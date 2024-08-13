@@ -677,6 +677,15 @@ double PairGayBerne::init_one(int i, int j)
    For new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   gammasb[j][i] = gammasb[i][j];
+/* ---------------------------------------------------------------------- */
+  epsilon[j][i] = epsilon[i][j];
+  sigma[j][i] = sigma[i][j];
+  lj1[j][i] = lj1[i][j];
+  lj2[j][i] = lj2[i][j];
+  lj3[j][i] = lj3[i][j];
+  lj4[j][i] = lj4[i][j];
+  offset[j][i] = offset[i][j];
+/* ---------------------------------------------------------------------- */
   cfa[j][i] = cfa[i][j]; 
   cfb[j][i] = cfb[i][j];
   cfc[j][i] = cfc[i][j]; 
@@ -689,7 +698,7 @@ double PairGayBerne::init_one(int i, int j)
   gamma_n[j][i] = gamma_n[i][j];
   gamma_t[j][i] = gamma_t[i][j];
   xmu[j][i] = xmu[i][j];
-  hf[j][i] = hf[i][j]; 
+  hf[j][i] = hf[i][j];
 /* ---------------------------------------------------------------------- */
   return cut[i][j];
 }
@@ -821,7 +830,7 @@ void PairGayBerne::write_restart_settings(FILE *fp)
   fwrite(&Q_flag,sizeof(int),1,fp);
   fwrite(&C_flag,sizeof(int),1,fp);
   fwrite(&interval,sizeof(int),1,fp);
-  fwrite(&A_const,sizeof(int),1,fp);
+  fwrite(&A_const,sizeof(double),1,fp);
 /* ---------------------------------------------------------------------- */
 }
 
@@ -846,7 +855,7 @@ void PairGayBerne::read_restart_settings(FILE *fp)
     utils::sfread(FLERR,&Q_flag,sizeof(int),1,fp,NULL,error);
     utils::sfread(FLERR,&C_flag,sizeof(int),1,fp,NULL,error);
     utils::sfread(FLERR,&interval,sizeof(int),1,fp,NULL,error);
-    utils::sfread(FLERR,&A_const,sizeof(int),1,fp,NULL,error);
+    utils::sfread(FLERR,&A_const,sizeof(double),1,fp,NULL,error);
 /* ---------------------------------------------------------------------- */
   }
   MPI_Bcast(&gamma,1,MPI_DOUBLE,0,world);
@@ -862,7 +871,7 @@ void PairGayBerne::read_restart_settings(FILE *fp)
   MPI_Bcast(&Q_flag,1,MPI_INT,0,world);
   MPI_Bcast(&C_flag,1,MPI_INT,0,world);
   MPI_Bcast(&interval,1,MPI_INT,0,world);
-  MPI_Bcast(&A_const,1,MPI_INT,0,world);
+  MPI_Bcast(&A_const,1,MPI_DOUBLE,0,world);
 /* ---------------------------------------------------------------------- */
 }
 
@@ -920,24 +929,27 @@ void PairGayBerne::write_data_all(FILE *fp)
    if newton is off, rtor is not calculated for ghost atoms
 ------------------------------------------------------------------------- */
 
-/*double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
+/*double PairGayBerne::gayberne_analytic(const int i,const int j,double 
+                                       a1[3][3],
                                        double a2[3][3], double b1[3][3],
                                        double b2[3][3], double g1[3][3],
                                        double g2[3][3], double *r12,
                                        const double rsq, double *fforce,
                                        double *ttor, double *rtor)*/
-/*--------------- Modified by Yohei Nakamichi ---------------*/
-double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
+double PairGayBerne::gayberne_analytic(const int i,const int j,
+                                       double a1[3][3],
                                        double a2[3][3], double b1[3][3],
                                        double b2[3][3], double g1[3][3],
                                        double g2[3][3], double *r12,
                                        const double rsq, double *fforce,
                                        double *ttor, double *rtor,
-                                       const double iweight, const double jweight,
+                                       const double iweight, 
+                                       const double jweight,
                                        double nveci[3], double nvecj[3],
                                        const double cosi, const double cosj,
-                                       int *touch, double *history, double *allhistory, const int jj )
-/*-----------------------------------------------------------*/
+                                       int *touch, double *history, 
+                                       double *allhistory, const int jj )
+/* ---------------------------------------------------------------------- */
 {
   double tempv[3], tempv2[3];
   double temp[3][3];
