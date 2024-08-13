@@ -1,3 +1,4 @@
+
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
    http://lammps.sandia.gov, Sandia National Laboratories
@@ -29,6 +30,15 @@
 #include "memory.h"
 #include "error.h"
 #include "utils.h"
+/*--------------- Modified by Yohei Nakamichi ---------------*/
+/* for calculation of tangential force */
+#include <cstring>
+#include "fix.h"
+#include "fix_neigh_history.h"
+//#include "neigh_request.h"
+#include "modify.h"
+#include "update.h"
+/*-----------------------------------------------------------*/
 
 using namespace LAMMPS_NS;
 
@@ -51,6 +61,14 @@ PairGayBerne::PairGayBerne(LAMMPS *lmp) : Pair(lmp)
 
   single_enable = 0;
   writedata = 1;
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  size_history = 3;
+  fix_history = NULL;
+  use_history = 1;
+  beyond_contact = 1;
+  no_virial_fdotr_compute = 1;
+  nondefault_history_transfer = 0;
+  /*-----------------------------------------------------------*/
 }
 
 /* ----------------------------------------------------------------------
@@ -59,11 +77,16 @@ PairGayBerne::PairGayBerne(LAMMPS *lmp) : Pair(lmp)
 
 PairGayBerne::~PairGayBerne()
 {
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  if (fix_history) modify->delete_fix("NEIGH_HISTORY");
+  /*-----------------------------------------------------------*/
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cutsq);
 
     memory->destroy(form);
+    memory->destroy(gammasb);
     memory->destroy(epsilon);
     memory->destroy(sigma);
     memory->destroy(shape1);
@@ -75,6 +98,20 @@ PairGayBerne::~PairGayBerne()
     memory->destroy(lj3);
     memory->destroy(lj4);
     memory->destroy(offset);
+    /*--------------- Modified by Yohei Nakamichi ---------------*/
+    memory->destroy(cfa);
+    memory->destroy(cfb);
+    memory->destroy(cfc);
+    memory->destroy(hth);
+    memory->destroy(aq);
+    memory->destroy(bq);
+    memory->destroy(cq);
+    memory->destroy(kn);
+    memory->destroy(kt);
+    memory->destroy(gamma_n); 
+    memory->destroy(gamma_t);
+    memory->destroy(xmu);
+    /*-----------------------------------------------------------*/
     delete [] lshape;
     delete [] setwell;
   }
@@ -90,6 +127,13 @@ void PairGayBerne::compute(int eflag, int vflag)
   double a1[3][3],b1[3][3],g1[3][3],a2[3][3],b2[3][3],g2[3][3],temp[3][3];
   int *ilist,*jlist,*numneigh,**firstneigh;
   double *iquat,*jquat;
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  int k;
+  double nveci[3], nvecj[3], dot_ni_r12, dot_nj_r12, norm_ni, norm_nj, norm_r12, cosi, cosj;
+  double iweight, jweight;
+  int *touch,**firsttouch;
+  double *history,*allhistory,**firsthistory;
+  /*-----------------------------------------------------------*/
 
   evdwl = 0.0;
   ev_init(eflag,vflag);
@@ -108,6 +152,11 @@ void PairGayBerne::compute(int eflag, int vflag)
   ilist = list->ilist;
   numneigh = list->numneigh;
   firstneigh = list->firstneigh;
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  firsttouch = fix_history->firstflag;
+  firsthistory = fix_history->firstvalue;
+  ntimestep = update->ntimestep;
+  /*-----------------------------------------------------------*/
 
   // loop over neighbors of my atoms
 
@@ -115,14 +164,19 @@ void PairGayBerne::compute(int eflag, int vflag)
     i = ilist[ii];
     itype = type[i];
 
-    if (form[itype][itype] == ELLIPSE_ELLIPSE) {
+    //if (form[itype][itype] == ELLIPSE_ELLIPSE) {
       iquat = bonus[ellipsoid[i]].quat;
       MathExtra::quat_to_mat_trans(iquat,a1);
-      MathExtra::diag_times3(well[itype],a1,temp);
+      /*MathExtra::diag_times3(well[itype],a1,temp);
       MathExtra::transpose_times3(a1,temp,b1);
       MathExtra::diag_times3(shape2[itype],a1,temp);
-      MathExtra::transpose_times3(a1,temp,g1);
-    }
+      MathExtra::transpose_times3(a1,temp,g1);*/
+    //}
+
+    /*--------------- Modified by Yohei Nakamichi ---------------*/
+    touch = firsttouch[i];
+    allhistory = firsthistory[i];
+    /*-----------------------------------------------------------*/
 
     jlist = firstneigh[i];
     jnum = numneigh[i];
@@ -145,7 +199,7 @@ void PairGayBerne::compute(int eflag, int vflag)
       if (rsq < cutsq[itype][jtype]) {
 
         switch (form[itype][jtype]) {
-        case SPHERE_SPHERE:
+        /*case SPHERE_SPHERE:
           r2inv = 1.0/rsq;
           r6inv = r2inv*r2inv*r2inv;
           forcelj = r6inv * (lj1[itype][jtype]*r6inv - lj2[itype][jtype]);
@@ -175,16 +229,81 @@ void PairGayBerne::compute(int eflag, int vflag)
           one_eng = gayberne_lj(i,j,a1,b1,g1,r12,rsq,fforce,ttor);
           rtor[0] = rtor[1] = rtor[2] = 0.0;
           break;
+          */
 
         default:
           jquat = bonus[ellipsoid[j]].quat;
           MathExtra::quat_to_mat_trans(jquat,a2);
-          MathExtra::diag_times3(well[jtype],a2,temp);
+          /*MathExtra::diag_times3(well[jtype],a2,temp);
           MathExtra::transpose_times3(a2,temp,b2);
           MathExtra::diag_times3(shape2[jtype],a2,temp);
           MathExtra::transpose_times3(a2,temp,g2);
           one_eng = gayberne_analytic(i,j,a1,a2,b1,b2,g1,g2,r12,rsq,
-                                      fforce,ttor,rtor);
+                                      fforce,ttor,rtor);*/
+
+          /*--------------- Modified by Yohei Nakamichi ---------------*/
+          /* This part is made to achieve modelling of anisotropic surfa-
+             ce charge of kaolinite particles. type=1 represents Silica 
+             face, type=2 represents Alumina face, and type=3 represents 
+             edge. Important thing is that this code works for only mono-
+             disperse sample - it doesn't work for poly disperse sample.*/
+          /*--- add 04 February 2022 --- */
+          //for(k=0; k<3; k++) nveci[k] = a1[k][2];
+          //for(k=0; k<3; k++) nvecj[k] = a2[k][2];
+          for(k=0; k<3; k++) nveci[k] = a1[2][k];
+          for(k=0; k<3; k++) nvecj[k] = a2[2][k];
+          /**/
+          /*for(k=0; k<3; k++) nveci[k] = a1[k][1];
+          for(k=0; k<3; k++) nvecj[k] = a2[k][1];*/
+          /**/
+          dot_ni_r12 = MathExtra::dot3(nveci,r12);
+          dot_nj_r12 = MathExtra::dot3(nvecj,r12);
+          norm_ni = sqrt( MathExtra::dot3(nveci,nveci) );
+          norm_nj = sqrt( MathExtra::dot3(nvecj,nvecj) );
+          norm_r12 = sqrt( rsq );
+          if ( norm_ni*norm_r12 != 0.0 ) cosi = dot_ni_r12/(norm_ni*norm_r12);
+          else cosi = 0.0;
+          iweight = pow(cosi, 2.0);
+          if ( norm_nj*norm_r12 != 0.0 ) cosj = dot_nj_r12/(norm_nj*norm_r12);
+          else cosj = 0.0;
+          jweight = pow(cosj, 2.0);
+
+          /* change atom-type */
+          //particle 1
+          if( type[i] == 1 || type[i] == 2){
+            if( cosi <= 1.0 && cosi >= 0.0 ) type[i] = 1;       //Silica face
+            else if ( cosi >= -1.0 && cosi < 0.0 ) type[i] = 2; //Alumina face
+          }
+          /* shape */
+          if(shape2[type[i]][0]==1.0 && shape2[type[i]][1]==1.0 && shape2[type[i]][2]==1.0){
+            for(k=0; k<3; k++) shape1[type[i]][k] = shape1[type[j]][k];
+            for(k=0; k<3; k++) shape2[type[i]][k] = shape2[type[j]][k];
+            lshape[type[i]] = (shape1[type[i]][0]*shape1[type[i]][1]+shape1[type[i]][2]*shape1[type[i]][2]) *sqrt(shape1[type[i]][0]*shape1[type[i]][1]);
+          }
+          //particle 2
+          if( type[j] == 1 || type[j] == 2 ){
+            if( cosj <= 1.0 && cosj >= 0.0 ) type[j] = 2;       //Alumina face
+            else if ( cosj >= -1.0 && cosj < 0.0 ) type[j] = 1; //Silica face
+          }
+          /* shape */
+          if(shape2[type[j]][0]==1.0 && shape2[type[j]][1]==1.0 && shape2[type[j]][2]==1.0){
+            for(k=0; k<3; k++) shape1[type[j]][k] = shape1[type[i]][k];
+            for(k=0; k<3; k++) shape2[type[j]][k] = shape2[type[i]][k];
+            lshape[type[j]] = (shape1[type[j]][0]*shape1[type[j]][1]+shape1[type[j]][2]*shape1[type[j]][2]) *sqrt(shape1[type[j]][0]*shape1[type[j]][1]);
+          }
+
+          MathExtra::diag_times3(shape2[itype],a1,temp);
+          MathExtra::transpose_times3(a1,temp,g1);
+          MathExtra::diag_times3(shape2[jtype],a2,temp);
+          MathExtra::transpose_times3(a2,temp,g2);
+          
+          MathExtra::diag_times3(well[type[i]],a1,temp);
+          MathExtra::transpose_times3(a1,temp,b1);
+          MathExtra::diag_times3(well[type[j]],a2,temp);
+          MathExtra::transpose_times3(a2,temp,b2);
+
+          one_eng = gayberne_analytic(i,j,a1,a2,b1,b2,g1,g2,r12,rsq,fforce,ttor,rtor,iweight,jweight,nveci,nvecj,cosi,cosj, touch, history, allhistory, jj);
+          /*-----------------------------------------------------------*/
           break;
         }
 
@@ -219,6 +338,12 @@ void PairGayBerne::compute(int eflag, int vflag)
         if (evflag) ev_tally_xyz(i,j,nlocal,newton_pair,
                                  evdwl,0.0,fforce[0],fforce[1],fforce[2],
                                  -r12[0],-r12[1],-r12[2]);
+      /*--------------- Modified by Yohei Nakamichi ---------------*/
+      }else{
+        touch[jj] = 0;
+        history = &allhistory[size_history*jj];
+        for (int k = 0; k < size_history; k++) history[k] = 0.0;
+      /*-----------------------------------------------------------*/
       }
     }
   }
@@ -243,6 +368,7 @@ void PairGayBerne::allocate()
   memory->create(cutsq,n+1,n+1,"pair:cutsq");
 
   memory->create(form,n+1,n+1,"pair:form");
+  memory->create(gammasb,n+1,n+1,"pair:gammasb");
   memory->create(epsilon,n+1,n+1,"pair:epsilon");
   memory->create(sigma,n+1,n+1,"pair:sigma");
   memory->create(shape1,n+1,3,"pair:shape1");
@@ -254,6 +380,21 @@ void PairGayBerne::allocate()
   memory->create(lj3,n+1,n+1,"pair:lj3");
   memory->create(lj4,n+1,n+1,"pair:lj4");
   memory->create(offset,n+1,n+1,"pair:offset");
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  memory->create(cfa,n+1,n+1,"pair:cfa");
+  memory->create(cfb,n+1,n+1,"pair:cfb");
+  memory->create(cfc,n+1,n+1,"pair:cfc");
+  memory->create(hth,n+1,n+1,"pair:hth");
+  memory->create(aq,n+1,n+1,"pair:aq");
+  memory->create(bq,n+1,n+1,"pair:bq");
+  memory->create(cq,n+1,n+1,"pair:cq");
+  memory->create(kn,n+1,n+1,"pair:kn");
+  memory->create(kt,n+1,n+1,"pair:kt");
+  memory->create(gamma_n,n+1,n+1,"pair:gamma_n"); 
+  memory->create(gamma_t,n+1,n+1,"pair:gamma_t");
+  memory->create(xmu,n+1,n+1,"pair:xmu");
+  memory->create(hf,n+1,n+1,"pair:hf");
+  /*-----------------------------------------------------------*/
 
   lshape = new double[n+1];
   setwell = new int[n+1];
@@ -266,12 +407,21 @@ void PairGayBerne::allocate()
 
 void PairGayBerne::settings(int narg, char **arg)
 {
-  if (narg != 4) error->all(FLERR,"Illegal pair_style command");
+  /*if (narg != 4) error->all(FLERR,"Illegal pair_style command");*/
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  if (narg != 8) error->all(FLERR,"Illegal pair_style command");
+  /*-----------------------------------------------------------*/
 
   gamma = force->numeric(FLERR,arg[0]);
   upsilon = force->numeric(FLERR,arg[1])/2.0;
   mu = force->numeric(FLERR,arg[2]);
   cut_global = force->numeric(FLERR,arg[3]);
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  DEM_flag = force->numeric(FLERR,arg[4]);
+  Q_flag = force->numeric(FLERR,arg[5]);
+  C_flag = force->numeric(FLERR,arg[6]);
+  interval = force->numeric(FLERR,arg[7]);
+  /*-----------------------------------------------------------*/
 
   // reset cutoffs that have been explicitly set
 
@@ -289,7 +439,10 @@ void PairGayBerne::settings(int narg, char **arg)
 
 void PairGayBerne::coeff(int narg, char **arg)
 {
-  if (narg < 10 || narg > 11)
+  /*if (narg < 10 || narg > 11)*/
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  if (narg < 24 || narg > 25)
+  /*-----------------------------------------------------------*/
     error->all(FLERR,"Incorrect args for pair coefficients");
   if (!allocated) allocate();
 
@@ -297,7 +450,7 @@ void PairGayBerne::coeff(int narg, char **arg)
   force->bounds(FLERR,arg[0],atom->ntypes,ilo,ihi);
   force->bounds(FLERR,arg[1],atom->ntypes,jlo,jhi);
 
-  double epsilon_one = force->numeric(FLERR,arg[2]);
+  /*double epsilon_one = force->numeric(FLERR,arg[2]);
   double sigma_one = force->numeric(FLERR,arg[3]);
   double eia_one = force->numeric(FLERR,arg[4]);
   double eib_one = force->numeric(FLERR,arg[5]);
@@ -307,13 +460,58 @@ void PairGayBerne::coeff(int narg, char **arg)
   double ejc_one = force->numeric(FLERR,arg[9]);
 
   double cut_one = cut_global;
-  if (narg == 11) cut_one = force->numeric(FLERR,arg[10]);
+  if (narg == 11) cut_one = force->numeric(FLERR,arg[10]);*/
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  double gammasb_one = force->numeric(FLERR,arg[2]); 
+  double epsilon_one = force->numeric(FLERR,arg[3]);
+  double sigma_one = force->numeric(FLERR,arg[4]);
+  double eia_one = force->numeric(FLERR,arg[5]);
+  double eib_one = force->numeric(FLERR,arg[6]);
+  double eic_one = force->numeric(FLERR,arg[7]);
+  double eja_one = force->numeric(FLERR,arg[8]);
+  double ejb_one = force->numeric(FLERR,arg[9]);
+  double ejc_one = force->numeric(FLERR,arg[10]);
+  double cfa_one = force->numeric(FLERR,arg[11]);
+  double cfb_one = force->numeric(FLERR,arg[12]);
+  double cfc_one = force->numeric(FLERR,arg[13]);
+  double hth_one = force->numeric(FLERR,arg[14]);
+  double aq_one = force->numeric(FLERR,arg[15]);
+  double bq_one = force->numeric(FLERR,arg[16]);
+  double cq_one = force->numeric(FLERR,arg[17]);
+  double kn_one = force->numeric(FLERR,arg[18]);
+  double kt_one = force->numeric(FLERR,arg[19]);
+  double gamma_n_one = force->numeric(FLERR,arg[20]);
+  double gamma_t_one = force->numeric(FLERR,arg[21]);
+  double xmu_one = force->numeric(FLERR,arg[22]);
+  double hf_one = force->numeric(FLERR,arg[23]);
+  double cut_one = cut_global;
+  if (narg == 25) cut_one = force->numeric(FLERR,arg[24]);
+  /*-----------------------------------------------------------*/
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     for (int j = MAX(jlo,i); j <= jhi; j++) {
+      /*--------------- Modified by Yohei Nakamichi ---------------*/
+      gammasb[i][j] = gammasb_one;
+      /*-----------------------------------------------------------*/
       epsilon[i][j] = epsilon_one;
       sigma[i][j] = sigma_one;
+      /*--------------- Modified by Yohei Nakamichi ---------------*/
+      cfa[i][j] = cfa_one;
+      cfb[i][j] = cfb_one;
+      cfc[i][j] = cfc_one;
+      hth[i][j] = hth_one;
+      aq[i][j] = aq_one;
+      bq[i][j] = bq_one;
+      cq[i][j] = cq_one;
+      kn[i][j] = kn_one;
+      kt[i][j] = kt_one;
+      gamma_n[i][j] = gamma_n_one;
+      gamma_t[i][j] = gamma_t_one;
+      xmu[i][j] = xmu_one;
+      hf[i][j] = hf_one;
+      /*-----------------------------------------------------------*/
+
       cut[i][j] = cut_one;
       if (eia_one != 0.0 || eib_one != 0.0 || eic_one != 0.0) {
         well[i][0] = pow(eia_one,-1.0/mu);
@@ -365,6 +563,31 @@ void PairGayBerne::init_style()
     lshape[i] = (shape1[i][0]*shape1[i][1]+shape1[i][2]*shape1[i][2]) *
       sqrt(shape1[i][0]*shape1[i][1]);
   }
+
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  dt = update->dt;
+
+  if (use_history && fix_history == NULL) {
+    char dnumstr[16];
+    sprintf(dnumstr,"%d",size_history);
+    char **fixarg = new char*[4];
+    fixarg[0] = (char *) "NEIGH_HISTORY";
+    fixarg[1] = (char *) "all";
+    fixarg[2] = (char *) "NEIGH_HISTORY";
+    fixarg[3] = dnumstr;
+    modify->add_fix(4,fixarg,1);
+    delete [] fixarg;
+    fix_history = (FixNeighHistory *) modify->fix[modify->nfix-1];
+    fix_history->pair = this;
+  }
+  // set fix which stores history info
+  if (use_history) {
+    int ifix = modify->find_fix("NEIGH_HISTORY");
+    if (ifix < 0) error->all(FLERR,"Could not find pair fix neigh history ID");
+    fix_history = (FixNeighHistory *) modify->fix[ifix];
+  }
+  /*-----------------------------------------------------------*/
+
 }
 
 /* ----------------------------------------------------------------------
@@ -415,6 +638,9 @@ double PairGayBerne::init_one(int i, int j)
   } else
     form[i][i] = form[j][j] = form[i][j] = form[j][i] = ELLIPSE_ELLIPSE;
 
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  gammasb[j][i] = gammasb[i][j];
+  /*-----------------------------------------------------------*/
   epsilon[j][i] = epsilon[i][j];
   sigma[j][i] = sigma[i][j];
   lj1[j][i] = lj1[i][j];
@@ -422,7 +648,21 @@ double PairGayBerne::init_one(int i, int j)
   lj3[j][i] = lj3[i][j];
   lj4[j][i] = lj4[i][j];
   offset[j][i] = offset[i][j];
-
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  cfa[j][i] = cfa[i][j]; 
+  cfb[j][i] = cfb[i][j];
+  cfc[j][i] = cfc[i][j]; 
+  hth[j][i] = hth[i][j];
+  aq[j][i] = aq[i][j]; 
+  bq[j][i] = bq[i][j];
+  cq[j][i] = cq[i][j]; 
+  kn[j][i] = kn[i][j];
+  kt[j][i] = kt[i][j];
+  gamma_n[j][i] = gamma_n[i][j];
+  gamma_t[j][i] = gamma_t[i][j];
+  xmu[j][i] = xmu[i][j];
+  hf[j][i] = hf[i][j];
+  /*-----------------------------------------------------------*/
   return cut[i][j];
 }
 
@@ -441,8 +681,26 @@ void PairGayBerne::write_restart(FILE *fp)
     for (j = i; j <= atom->ntypes; j++) {
       fwrite(&setflag[i][j],sizeof(int),1,fp);
       if (setflag[i][j]) {
+        /*--------------- Modified by Yohei Nakamichi ---------------*/
+        fwrite(&gammasb[i][j],sizeof(double),1,fp); 
+        /*-----------------------------------------------------------*/
         fwrite(&epsilon[i][j],sizeof(double),1,fp);
         fwrite(&sigma[i][j],sizeof(double),1,fp);
+        /*--------------- Modified by Yohei Nakamichi ---------------*/
+        fwrite(&cfa[i][j],sizeof(double),1,fp); 
+        fwrite(&cfb[i][j],sizeof(double),1,fp);
+        fwrite(&cfc[i][j],sizeof(double),1,fp);
+        fwrite(&hth[i][j],sizeof(double),1,fp);
+        fwrite(&aq[i][j],sizeof(double),1,fp); 
+        fwrite(&bq[i][j],sizeof(double),1,fp);
+        fwrite(&cq[i][j],sizeof(double),1,fp);
+        fwrite(&kn[i][j],sizeof(double),1,fp);
+        fwrite(&kt[i][j],sizeof(double),1,fp);
+        fwrite(&gamma_n[i][j],sizeof(double),1,fp);
+        fwrite(&gamma_t[i][j],sizeof(double),1,fp);
+        fwrite(&xmu[i][j],sizeof(double),1,fp);
+        fwrite(&hf[i][j],sizeof(double),1,fp);
+        /*-----------------------------------------------------------*/
         fwrite(&cut[i][j],sizeof(double),1,fp);
       }
     }
@@ -472,12 +730,48 @@ void PairGayBerne::read_restart(FILE *fp)
       MPI_Bcast(&setflag[i][j],1,MPI_INT,0,world);
       if (setflag[i][j]) {
         if (me == 0) {
+          /*--------------- Modified by Yohei Nakamichi ---------------*/
+          utils::sfread(FLERR,&gammasb[i][j],sizeof(double),1,fp,NULL,error);
+          /*-----------------------------------------------------------*/
           utils::sfread(FLERR,&epsilon[i][j],sizeof(double),1,fp,NULL,error);
           utils::sfread(FLERR,&sigma[i][j],sizeof(double),1,fp,NULL,error);
+          /*--------------- Modified by Yohei Nakamichi ---------------*/
+          utils::sfread(FLERR,&cfa[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&cfb[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&cfc[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&hth[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&aq[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&bq[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&cq[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&kn[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&kt[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&gamma_n[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&gamma_t[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&xmu[i][j],sizeof(double),1,fp,NULL,error);
+          utils::sfread(FLERR,&hf[i][j],sizeof(double),1,fp,NULL,error);
+          /*-----------------------------------------------------------*/
           utils::sfread(FLERR,&cut[i][j],sizeof(double),1,fp,NULL,error);
         }
+        /*--------------- Modified by Yohei Nakamichi ---------------*/
+        MPI_Bcast(&gammasb[i][j],1,MPI_DOUBLE,0,world);
+        /*-----------------------------------------------------------*/
         MPI_Bcast(&epsilon[i][j],1,MPI_DOUBLE,0,world);
         MPI_Bcast(&sigma[i][j],1,MPI_DOUBLE,0,world);
+        /*--------------- Modified by Yohei Nakamichi ---------------*/
+        MPI_Bcast(&cfa[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&cfb[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&cfc[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&hth[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&aq[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&bq[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&cq[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&kn[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&kt[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&gamma_n[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&gamma_t[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&xmu[i][j],1,MPI_DOUBLE,0,world);
+        MPI_Bcast(&hf[i][j],1,MPI_DOUBLE,0,world);
+        /*-----------------------------------------------------------*/
         MPI_Bcast(&cut[i][j],1,MPI_DOUBLE,0,world);
       }
     }
@@ -496,6 +790,12 @@ void PairGayBerne::write_restart_settings(FILE *fp)
   fwrite(&cut_global,sizeof(double),1,fp);
   fwrite(&offset_flag,sizeof(int),1,fp);
   fwrite(&mix_flag,sizeof(int),1,fp);
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  fwrite(&DEM_flag,sizeof(int),1,fp);
+  fwrite(&Q_flag,sizeof(int),1,fp);
+  fwrite(&C_flag,sizeof(int),1,fp);
+  fwrite(&interval,sizeof(int),1,fp);
+  /*-----------------------------------------------------------*/
 }
 
 /* ----------------------------------------------------------------------
@@ -512,6 +812,12 @@ void PairGayBerne::read_restart_settings(FILE *fp)
     utils::sfread(FLERR,&cut_global,sizeof(double),1,fp,NULL,error);
     utils::sfread(FLERR,&offset_flag,sizeof(int),1,fp,NULL,error);
     utils::sfread(FLERR,&mix_flag,sizeof(int),1,fp,NULL,error);
+    /*--------------- Modified by Yohei Nakamichi ---------------*/
+    utils::sfread(FLERR,&DEM_flag,sizeof(int),1,fp,NULL,error);
+    utils::sfread(FLERR,&Q_flag,sizeof(int),1,fp,NULL,error);
+    utils::sfread(FLERR,&C_flag,sizeof(int),1,fp,NULL,error);
+    utils::sfread(FLERR,&interval,sizeof(int),1,fp,NULL,error);
+    /*-----------------------------------------------------------*/
   }
   MPI_Bcast(&gamma,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&upsilon,1,MPI_DOUBLE,0,world);
@@ -519,6 +825,12 @@ void PairGayBerne::read_restart_settings(FILE *fp)
   MPI_Bcast(&cut_global,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&offset_flag,1,MPI_INT,0,world);
   MPI_Bcast(&mix_flag,1,MPI_INT,0,world);
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  MPI_Bcast(&DEM_flag,1,MPI_INT,0,world);
+  MPI_Bcast(&Q_flag,1,MPI_INT,0,world);
+  MPI_Bcast(&C_flag,1,MPI_INT,0,world);
+  MPI_Bcast(&interval,1,MPI_INT,0,world);
+  /*-----------------------------------------------------------*/
 }
 
 /* ----------------------------------------------------------------------
@@ -528,8 +840,14 @@ void PairGayBerne::read_restart_settings(FILE *fp)
 void PairGayBerne::write_data(FILE *fp)
 {
   for (int i = 1; i <= atom->ntypes; i++)
-    fprintf(fp,"%d %g %g %g %g %g %g %g %g\n",i,
-            epsilon[i][i],sigma[i][i],
+    /*fprintf(fp,"%d %g %g %g %g %g %g %g %g\n",i,
+            epsilon[i][i],sigma[i][i],*/
+    /*--------------- Modified by Yohei Nakamichi ---------------*/
+    fprintf(fp,"%d %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g\n",i, 
+            gammasb[i][i],epsilon[i][i],sigma[i][i],cfa[i][i],cfb[i][i],
+            cfc[i][i], hth[i][i], aq[i][i], bq[i][i], cq[i][i], kn[i][i],
+            kt[i][i],gamma_n[i][i],gamma_t[i][i], xmu[i][i], hf[i][i],
+    /*-----------------------------------------------------------*/
             pow(well[i][0],-mu),pow(well[i][1],-mu),pow(well[i][2],-mu),
             pow(well[i][0],-mu),pow(well[i][1],-mu),pow(well[i][2],-mu));
 }
@@ -542,8 +860,14 @@ void PairGayBerne::write_data_all(FILE *fp)
 {
   for (int i = 1; i <= atom->ntypes; i++)
     for (int j = i; j <= atom->ntypes; j++)
-      fprintf(fp,"%d %d %g %g %g %g %g %g %g %g %g\n",i,j,
-              epsilon[i][i],sigma[i][i],
+      /*fprintf(fp,"%d %d %g %g %g %g %g %g %g %g %g\n",i,j,
+              epsilon[i][i],sigma[i][i],*/
+      /*--------------- Modified by Yohei Nakamichi ---------------*/
+      fprintf(fp,"%d %d %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g\n",i,j, 
+              gammasb[i][i],epsilon[i][i],sigma[i][i],cfa[i][i],cfb[i][i],
+              cfc[i][i], hth[i][i], aq[i][i], bq[i][i], cq[i][i], kn[i][i],
+              kt[i][i],gamma_n[i][i],gamma_t[i][i], xmu[i][i], hf[i][i],
+      /*-----------------------------------------------------------*/
               pow(well[i][0],-mu),pow(well[i][1],-mu),pow(well[i][2],-mu),
               pow(well[j][0],-mu),pow(well[j][1],-mu),pow(well[j][2],-mu),
               cut[i][j]);
@@ -555,24 +879,74 @@ void PairGayBerne::write_data_all(FILE *fp)
    if newton is off, rtor is not calculated for ghost atoms
 ------------------------------------------------------------------------- */
 
+/*double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
+                                       double a2[3][3], double b1[3][3],
+                                       double b2[3][3], double g1[3][3],
+                                       double g2[3][3], double *r12,
+                                       const double rsq, double *fforce,
+                                       double *ttor, double *rtor)*/
+/*--------------- Modified by Yohei Nakamichi ---------------*/
 double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
                                        double a2[3][3], double b1[3][3],
                                        double b2[3][3], double g1[3][3],
                                        double g2[3][3], double *r12,
                                        const double rsq, double *fforce,
-                                       double *ttor, double *rtor)
+                                       double *ttor, double *rtor,
+                                       const double iweight, const double jweight,
+                                       double nveci[3], double nvecj[3],
+                                       const double cosi, const double cosj,
+                                       int *touch, double *history, double *allhistory, const int jj )
+/*-----------------------------------------------------------*/
 {
   double tempv[3], tempv2[3];
   double temp[3][3];
   double temp1,temp2,temp3;
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  double vr1,vr2,vr3,vnnr,vn1,vn2,vn3,vt1,vt2,vt3, vnn;
+  double xtmp,ytmp,ztmp,delx,dely,delz,fx,fy,fz;
+  double wr1,wr2,wr3;
+  double vtr1,vtr2,vtr3,vrel;
+  double shrmag,rsht;
+  double mi,mj,meff,damp,ccel,tor1,tor2,tor3;
+  double fn,fs,fnn[3],fss[3],fnk[3];
+  double xc[3], xca[3], xcb[3], xa[3], xb[3];
+  double itor[3], jtor[3];
+  double wr[3], iwbody[3], jwbody[3], tmp_iwbody[3], tmp_jwbody[3];
+  double radi, radj;
+  double inertia[3];
+  double rot[3][3];
+  double xca_hat[3], xcb_hat[3];
+  double nf_torque, f_torque[3];
+  double ellipsoid_diameter;
+  double cutoff;
+  /*-----------------------------------------------------------*/
 
   int *type = atom->type;
   int newton_pair = force->newton_pair;
   int nlocal = atom->nlocal;
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  AtomVecEllipsoid::Bonus *bonus = avec->bonus;
+  int *ellipsoid = atom->ellipsoid;
+  double *iquat,*jquat;
+  double **x = atom->x;
+  double **v = atom->v;
+  double *radius = atom->radius;
+  double **omega = atom->omega;
+  double *rmass = atom->rmass;
+  double **angmom = atom->angmom;
+  double *drho = atom->drho;
+  tagint *tag = atom->tag;
+  /*-----------------------------------------------------------*/
 
   double r12hat[3];
   MathExtra::normalize3(r12,r12hat);
   double r = sqrt(rsq);
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  double rinv = 1.0/r;
+  double rsqinv = 1.0/rsq;
+  int shearupdate = 1;
+  if (update->setupflag) shearupdate = 0;
+  /*-----------------------------------------------------------*/
 
   // compute distance of closest approach
 
@@ -591,13 +965,107 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
   sigma12 = pow(0.5*sigma12,-0.5);
   double h12 = r-sigma12;
 
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  /* This part is the algorithm to make simulations efficient. 
+     Cut-off range is modified by a function of h12.           */
+  /*----------------------------------------*/
+  ellipsoid_diameter = (shape1[type[i]][0]+shape1[type[i]][1]+shape1[type[j]][0]+shape1[type[j]][1])/2.0;
+  //ellipsoid_diameter = (shape1[type[i]][0]+shape1[type[i]][2]+shape1[type[j]][0]+shape1[type[j]][2])/2.0;
+  cutoff = sqrt(cutsq[type[i]][type[j]]) - ellipsoid_diameter;
+  if(h12 > cutoff){
+    fforce[0] = 0.0;
+    fforce[1] = 0.0;
+    fforce[2] = 0.0;
+    ttor[0] = 0.0;
+    ttor[1] = 0.0;
+    ttor[2] = 0.0;
+    rtor[0] = 0.0;
+    rtor[1] = 0.0;
+    rtor[2] = 0.0;
+    return 0.0;
+  }
+  /*-----------------------------------------------------------*/
+
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  /* This part is the algorithm to calculate contact point of ea-
+     ch particle. The clisest distance vector is parallel to cen-
+     tre-to-centre vector. */
+  /*----------------------------------------*/
+  MathExtra::vecmat(kappa,g1,xca);
+  MathExtra::vecmat(kappa,g2,xcb);
+  for(int k=0; k<3; k++) xc[k] = xca[k] + x[i][k];
+  for(int k=0; k<3; k++) xa[k] = x[i][k] + xca[k]*sigma12/r;
+  //for(int k=0; k<3; k++) xb[k] = x[j][k] + xcb[k]*sigma12/r;
+  for(int k=0; k<3; k++) xb[k] = x[j][k] - xcb[k]*sigma12/r;
+  //printf("%e %e %e %e %e %e %e \n", h12, xca[0], xca[1], xca[2], xcb[0], xcb[1], xcb[2]);
+  //printf("%e %e %e %e %e %e %e %e %e %e\n", h12, xc[0], xc[1], xc[2], xa[0], xa[1], xa[2], xb[0], xb[1], xb[2]);
+  /*-----------------------------------------------------------*/
+
   // energy
   // compute u_r
 
-  double varrho = sigma[type[i]][type[j]]/(h12+gamma*sigma[type[i]][type[j]]);
+  /*double varrho = sigma[type[i]][type[j]]/(h12+gamma*sigma[type[i]][type[j]]);
   double varrho6 = pow(varrho,6.0);
   double varrho12 = varrho6*varrho6;
-  double u_r = 4.0*epsilon[type[i]][type[j]]*(varrho12-varrho6);
+  double u_r = 4.0*epsilon[type[i]][type[j]]*(varrho12-varrho6);*/
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  double tmp_h12 = h12;
+  //if( tmp_h12 < 0.0 ) tmp_h12 = 0.0;
+
+  // Core-Core
+  double varrho_cc, varrho6_cc, varrho12_cc, varrho3_cc, u_r_cc;
+  varrho_cc   = sigma[type[i]][type[j]]/(tmp_h12+gammasb[type[i]][type[j]]*sigma[type[i]][type[j]]);
+  varrho12_cc = cfa[type[i]][type[j]]*pow(varrho_cc, 12.0);
+  varrho6_cc  = cfb[type[i]][type[j]]*pow(varrho_cc,  6.0);
+  varrho3_cc  = cfc[type[i]][type[j]]*pow(varrho_cc,  3.0);
+  u_r_cc      = varrho12_cc-varrho6_cc+varrho3_cc;
+  // quadratic function
+  if( Q_flag == 1 && tmp_h12 < hth[type[i]][type[j]] ){
+    u_r_cc = aq[type[i]][type[j]]*tmp_h12*tmp_h12 + bq[type[i]][type[j]]*tmp_h12 + cq[type[i]][type[j]];
+  }
+
+  // Halo-Halo
+  double varrho_hh, varrho6_hh, varrho12_hh, varrho3_hh, u_r_hh;
+  varrho_hh   = sigma[3][3]/(tmp_h12+gammasb[3][3]*sigma[3][3]); 
+  varrho12_hh = cfa[3][3]*pow(varrho_hh, 12.0);
+  varrho6_hh  = cfb[3][3]*pow(varrho_hh,  6.0);
+  varrho3_hh  = cfc[3][3]*pow(varrho_hh,  3.0);
+  u_r_hh      = varrho12_hh-varrho6_hh+varrho3_hh;
+  // quadratic function
+  if( Q_flag == 1 && tmp_h12 < hth[3][3] ){
+    u_r_hh = aq[3][3]*tmp_h12*tmp_h12 + bq[3][3]*tmp_h12 + cq[3][3];
+  }
+
+  // Core-Halo
+  double varrho_ch, varrho6_ch, varrho12_ch, varrho3_ch, u_r_ch;
+  varrho_ch   = sigma[type[i]][3]/(tmp_h12+gammasb[type[i]][3]*sigma[type[i]][3]); 
+  varrho12_ch = cfa[type[i]][3]*pow(varrho_ch, 12.0);
+  varrho6_ch  = cfb[type[i]][3]*pow(varrho_ch,  6.0);
+  varrho3_ch  = cfc[type[i]][3]*pow(varrho_ch,  3.0);
+  u_r_ch      = varrho12_ch-varrho6_ch+varrho3_ch;
+  // quadratic function
+  if( Q_flag == 1 && tmp_h12 < hth[type[i]][3] ){
+    u_r_ch = aq[type[i]][3]*tmp_h12*tmp_h12 + bq[type[i]][3]*tmp_h12 + cq[type[i]][3];
+  }
+
+  // Halo-Core
+  double varrho_hc, varrho6_hc, varrho12_hc, varrho3_hc, u_r_hc;
+  varrho_hc   = sigma[3][type[j]]/(tmp_h12+gammasb[3][type[j]]*sigma[3][type[j]]); 
+  varrho12_hc = cfa[3][type[j]]*pow(varrho_hc, 12.0);
+  varrho6_hc  = cfb[3][type[j]]*pow(varrho_hc,  6.0);
+  varrho3_hc  = cfc[3][type[j]]*pow(varrho_hc,  3.0);
+  u_r_hc      = varrho12_hc-varrho6_hc+varrho3_hc;
+  // quadratic function
+  if( Q_flag == 1 && tmp_h12 < hth[3][type[j]] ){
+    u_r_hc = aq[3][type[j]]*tmp_h12*tmp_h12 + bq[3][type[j]]*tmp_h12 + cq[3][type[j]];
+  }
+
+  //total potential energy
+  double u_gb = iweight*jweight*u_r_cc
+              + iweight*(1.0-jweight)*u_r_ch
+              + (1.0-iweight)*jweight*u_r_hc
+              + (1.0-iweight)*(1.0-jweight)*u_r_hh;
+  /*-----------------------------------------------------------*/
 
   // compute eta_12
 
@@ -624,7 +1092,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
   // force
   // compute dUr/dr
 
-  temp1 = (2.0*varrho12*varrho-varrho6*varrho)/sigma[type[i]][type[j]];
+  /*temp1 = (2.0*varrho12*varrho-varrho6*varrho)/sigma[type[i]][type[j]];
   temp1 = temp1*24.0*epsilon[type[i]][type[j]];
   double u_slj = temp1*pow(sigma12,3.0)/2.0;
   double dUr[3];
@@ -632,7 +1100,92 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
   double uslj_rsq = u_slj/rsq;
   dUr[0] = temp1*r12hat[0]+uslj_rsq*(kappa[0]-temp2*r12hat[0]);
   dUr[1] = temp1*r12hat[1]+uslj_rsq*(kappa[1]-temp2*r12hat[1]);
-  dUr[2] = temp1*r12hat[2]+uslj_rsq*(kappa[2]-temp2*r12hat[2]);
+  dUr[2] = temp1*r12hat[2]+uslj_rsq*(kappa[2]-temp2*r12hat[2]);*/
+
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  //  Core-Core
+  double u_slj_cc, dUr_cc[3], uslj_rsq_cc;
+  temp1 = (12.0*varrho12_cc*varrho_cc - 6.0*varrho6_cc*varrho_cc + 3.0*varrho3_cc*varrho_cc)/sigma[type[i]][type[j]];
+  // quadratic function
+  if( Q_flag == 1 && tmp_h12 < hth[type[i]][type[j]] ) temp1 = -(2.0*aq[type[i]][type[j]]*tmp_h12+bq[type[i]][type[j]]);
+  temp2 = MathExtra::dot3(kappa,r12hat);
+  u_slj_cc = temp1*pow(sigma12,3.0)/2.0;
+  uslj_rsq_cc = u_slj_cc/rsq;
+  dUr_cc[0] = temp1*r12hat[0]+uslj_rsq_cc*(kappa[0]-temp2*r12hat[0]);
+  dUr_cc[1] = temp1*r12hat[1]+uslj_rsq_cc*(kappa[1]-temp2*r12hat[1]);
+  dUr_cc[2] = temp1*r12hat[2]+uslj_rsq_cc*(kappa[2]-temp2*r12hat[2]);
+
+  //Halo-Halo
+  double u_slj_hh, dUr_hh[3], uslj_rsq_hh;
+  temp1 = (12.0*varrho12_hh*varrho_hh - 6.0*varrho6_hh*varrho_hh + 3.0*varrho3_hh*varrho_hh)/sigma[3][3];
+  // quadratic function
+  if( Q_flag == 1 && tmp_h12 < hth[3][3] ) temp1 = -(2.0*aq[3][3]*tmp_h12+bq[3][3]);
+  temp2 = MathExtra::dot3(kappa,r12hat);
+  u_slj_hh = temp1*pow(sigma12,3.0)/2.0;
+  uslj_rsq_hh = u_slj_hh/rsq;
+  dUr_hh[0] = temp1*r12hat[0]+uslj_rsq_hh*(kappa[0]-temp2*r12hat[0]);
+  dUr_hh[1] = temp1*r12hat[1]+uslj_rsq_hh*(kappa[1]-temp2*r12hat[1]);
+  dUr_hh[2] = temp1*r12hat[2]+uslj_rsq_hh*(kappa[2]-temp2*r12hat[2]);
+
+  //Core-Halo
+  double u_slj_ch, dUr_ch[3], uslj_rsq_ch;
+  temp1 = (12.0*varrho12_ch*varrho_ch - 6.0*varrho6_ch*varrho_ch + 3.0*varrho3_ch*varrho_ch)/sigma[type[i]][3];
+  // quadratic function
+  if( Q_flag == 1 && tmp_h12 < hth[type[i]][3] ) temp1 = -(2.0*aq[type[i]][3]*tmp_h12+bq[type[i]][3]);
+  temp2 = MathExtra::dot3(kappa,r12hat);
+  u_slj_ch = temp1*pow(sigma12,3.0)/2.0;
+  uslj_rsq_ch = u_slj_ch/rsq;
+  dUr_ch[0] = temp1*r12hat[0]+uslj_rsq_ch*(kappa[0]-temp2*r12hat[0]);
+  dUr_ch[1] = temp1*r12hat[1]+uslj_rsq_ch*(kappa[1]-temp2*r12hat[1]);
+  dUr_ch[2] = temp1*r12hat[2]+uslj_rsq_ch*(kappa[2]-temp2*r12hat[2]);
+
+  //printf("%e %e %e\n", dUr_ch[0], dUr_ch[1], dUr_ch[2]);
+
+  //halo-Core
+  double u_slj_hc, dUr_hc[3], uslj_rsq_hc;
+  temp1 = (12.0*varrho12_hc*varrho_hc - 6.0*varrho6_hc*varrho_hc + 3.0*varrho3_hc*varrho_hc)/sigma[3][type[j]];
+  // quadratic function
+  if( Q_flag == 1 && tmp_h12 < hth[3][type[j]] ) temp1 = -(2.0*aq[3][type[j]]*tmp_h12+bq[3][type[j]]);
+  temp2 = MathExtra::dot3(kappa,r12hat);
+  u_slj_hc = temp1*pow(sigma12,3.0)/2.0;
+  uslj_rsq_hc = u_slj_hc/rsq;
+  dUr_hc[0] = temp1*r12hat[0]+uslj_rsq_hc*(kappa[0]-temp2*r12hat[0]);
+  dUr_hc[1] = temp1*r12hat[1]+uslj_rsq_hc*(kappa[1]-temp2*r12hat[1]);
+  dUr_hc[2] = temp1*r12hat[2]+uslj_rsq_hc*(kappa[2]-temp2*r12hat[2]);
+
+  //printf("%e %e \n", iweight, jweight);
+
+  // cpmpute diweight/dr and djweight/dr
+
+  double dot_ni_r12hat = MathExtra::dot3(nveci,r12hat);
+  double norm_ni = sqrt( MathExtra::dot3(nveci,nveci) );
+  double diweight[3];
+  diweight[0] = 2.0*cosi/(norm_ni*rsq)*(nveci[0]-dot_ni_r12hat*r12hat[0]);
+  diweight[1] = 2.0*cosi/(norm_ni*rsq)*(nveci[1]-dot_ni_r12hat*r12hat[1]);
+  diweight[2] = 2.0*cosi/(norm_ni*rsq)*(nveci[2]-dot_ni_r12hat*r12hat[2]);
+
+  double dot_nj_r12hat = MathExtra::dot3(nvecj,r12hat);
+  double norm_nj = sqrt( MathExtra::dot3(nvecj,nvecj) );
+  double djweight[3];
+  djweight[0] = 2.0*cosj/(norm_nj*rsq)*(nvecj[0]-dot_nj_r12hat*r12hat[0]);
+  djweight[1] = 2.0*cosj/(norm_nj*rsq)*(nvecj[1]-dot_nj_r12hat*r12hat[1]);
+  djweight[2] = 2.0*cosj/(norm_nj*rsq)*(nvecj[2]-dot_nj_r12hat*r12hat[2]);
+
+  // compute dUr/dr
+  double dUr[3];
+  dUr[0] = iweight*jweight*dUr_cc[0] + iweight*djweight[0]*u_r_cc + diweight[0]*jweight*u_r_cc
+         + iweight*(1.0-jweight)*dUr_ch[0] - iweight*djweight[0]*u_r_ch + diweight[0]*(1.0-jweight)*u_r_ch
+         + (1.0-iweight)*jweight*dUr_hc[0] + (1.0-iweight)*djweight[0]*u_r_hc - diweight[0]*jweight*u_r_hc
+         + (1.0-iweight)*(1.0-jweight)*dUr_hh[0] - (1.0-iweight)*djweight[0]*u_r_hh - diweight[0]*(1.0-jweight)*u_r_hh;
+  dUr[1] = iweight*jweight*dUr_cc[1] + iweight*djweight[1]*u_r_cc + diweight[1]*jweight*u_r_cc
+         + iweight*(1.0-jweight)*dUr_ch[1] - iweight*djweight[1]*u_r_ch + diweight[1]*(1.0-jweight)*u_r_ch
+         + (1.0-iweight)*jweight*dUr_hc[1] + (1.0-iweight)*djweight[1]*u_r_hc - diweight[1]*jweight*u_r_hc
+         + (1.0-iweight)*(1.0-jweight)*dUr_hh[1] - (1.0-iweight)*djweight[1]*u_r_hh - diweight[1]*(1.0-jweight)*u_r_hh;
+  dUr[2] = iweight*jweight*dUr_cc[2] + iweight*djweight[2]*u_r_cc + diweight[2]*jweight*u_r_cc
+         + iweight*(1.0-jweight)*dUr_ch[2] - iweight*djweight[2]*u_r_ch + diweight[2]*(1.0-jweight)*u_r_ch
+         + (1.0-iweight)*jweight*dUr_hc[2] + (1.0-iweight)*djweight[2]*u_r_hc - diweight[2]*jweight*u_r_hc
+         + (1.0-iweight)*(1.0-jweight)*dUr_hh[2] - (1.0-iweight)*djweight[2]*u_r_hh - diweight[2]*(1.0-jweight)*u_r_hh;
+  /*-----------------------------------------------------------*/
 
   // compute dChi_12/dr
 
@@ -643,18 +1196,40 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
   dchi[1] = temp2*(iota[1]-temp1*r12hat[1]);
   dchi[2] = temp2*(iota[2]-temp1*r12hat[2]);
 
-  temp1 = -eta*u_r;
+  temp1 = -eta*u_gb;
   temp3 = eta*chi;
   fforce[0] = temp1*dchi[0]-temp3*dUr[0];
   fforce[1] = temp1*dchi[1]-temp3*dUr[1];
   fforce[2] = temp1*dchi[2]-temp3*dUr[2];
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  if(DEM_flag == 1){
+    fforce[0] = 0.0;
+    fforce[1] = 0.0;
+    fforce[2] = 0.0;
+  }
+  /*-----------------------------------------------------------*/
 
   // torque for particle 1 and 2
   // compute dUr
 
-  tempv[0] = -uslj_rsq*kappa[0];
+  /*tempv[0] = -uslj_rsq*kappa[0];
   tempv[1] = -uslj_rsq*kappa[1];
-  tempv[2] = -uslj_rsq*kappa[2];
+  tempv[2] = -uslj_rsq*kappa[2];*/
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  tempv[0] = -(1.0/r)*(iweight*jweight*u_slj_cc/r*kappa[0] + iweight*djweight[0]*u_r_cc + diweight[0]*jweight*u_r_cc
+           + iweight*(1.0-jweight)*u_slj_ch/r*kappa[0] - iweight*djweight[0]*u_r_ch + diweight[0]*(1.0-jweight)*u_r_ch
+           + (1.0-iweight)*jweight*u_slj_hc/r*kappa[0] + (1.0-iweight)*djweight[0]*u_r_hc - diweight[0]*jweight*u_r_hc
+           + (1.0-iweight)*(1.0-jweight)*u_slj_hh/r*kappa[0] - (1.0-iweight)*djweight[0]*u_r_hh - diweight[0]*(1.0-jweight)*u_r_hh);
+  tempv[1] = -(1.0/r)*(iweight*jweight*u_slj_cc/r*kappa[1] + iweight*djweight[1]*u_r_cc + diweight[1]*jweight*u_r_cc
+           + iweight*(1.0-jweight)*u_slj_ch/r*kappa[1] - iweight*djweight[1]*u_r_ch + diweight[1]*(1.0-jweight)*u_r_ch
+           + (1.0-iweight)*jweight*u_slj_hc/r*kappa[1] + (1.0-iweight)*djweight[1]*u_r_hc - diweight[1]*jweight*u_r_hc
+           + (1.0-iweight)*(1.0-jweight)*u_slj_hh/r*kappa[1] - (1.0-iweight)*djweight[1]*u_r_hh - diweight[1]*(1.0-jweight)*u_r_hh);
+  tempv[2] = -(1.0/r)*(iweight*jweight*u_slj_cc/r*kappa[2] + iweight*djweight[2]*u_r_cc + diweight[2]*jweight*u_r_cc
+           + iweight*(1.0-jweight)*u_slj_ch/r*kappa[2] - iweight*djweight[2]*u_r_ch + diweight[2]*(1.0-jweight)*u_r_ch
+           + (1.0-iweight)*jweight*u_slj_hc/r*kappa[2] + (1.0-iweight)*djweight[2]*u_r_hc - diweight[2]*jweight*u_r_hc
+           + (1.0-iweight)*(1.0-jweight)*u_slj_hh/r*kappa[2] - (1.0-iweight)*djweight[2]*u_r_hh - diweight[2]*(1.0-jweight)*u_r_hh);
+  /*-----------------------------------------------------------*/
+
   MathExtra::vecmat(kappa,g1,tempv2);
   MathExtra::cross3(tempv,tempv2,dUr);
   double dUr2[3];
@@ -663,6 +1238,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
     MathExtra::vecmat(kappa,g2,tempv2);
     MathExtra::cross3(tempv,tempv2,dUr2);
   }
+
 
   // compute d_chi
 
@@ -711,22 +1287,312 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
   }
 
   // torque
-
-  temp1 = u_r*eta;
-  temp2 = u_r*chi;
+  temp1 = u_gb*eta;
+  temp2 = u_gb*chi;
   temp3 = chi*eta;
 
   ttor[0] = (temp1*dchi[0]+temp2*deta[0]+temp3*dUr[0]) * -1.0;
   ttor[1] = (temp1*dchi[1]+temp2*deta[1]+temp3*dUr[1]) * -1.0;
   ttor[2] = (temp1*dchi[2]+temp2*deta[2]+temp3*dUr[2]) * -1.0;
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  if(DEM_flag == 1){
+    ttor[0] = 0.0;
+    ttor[1] = 0.0;
+    ttor[2] = 0.0;
+  }
+  /*-----------------------------------------------------------*/
 
   if (newton_pair || j < nlocal) {
     rtor[0] = (temp1*dchi2[0]+temp2*deta2[0]+temp3*dUr2[0]) * -1.0;
     rtor[1] = (temp1*dchi2[1]+temp2*deta2[1]+temp3*dUr2[1]) * -1.0;
     rtor[2] = (temp1*dchi2[2]+temp2*deta2[2]+temp3*dUr2[2]) * -1.0;
+    /*--------------- Modified by Yohei Nakamichi ---------------*/
+    if(DEM_flag == 1){
+      rtor[0] = 0.0;
+      rtor[1] = 0.0;
+      rtor[2] = 0.0;
+    }
+    /*-----------------------------------------------------------*/
   }
 
-  return temp1*chi;
+  /*return temp1*chi;*/
+
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  /* Thia part is for calculation of tangential force. Tangential
+     force is calculated using Hookean contact model. if DEM_flag
+     is one, normal force is calculated using Hookean contacr mo-
+     del instead of Gay-Berne potential. In this case, potential 
+     energy isn't calculated, it keeps zero value.*/
+  /*----------------------------------------*/
+  double vr[3], vn[3], vt[3], vnr[3], vrr[3];
+
+  /*zero set*/
+  fss[0] = 0.0;
+  fss[1] = 0.0;
+  fss[2] = 0.0;
+  fnn[0] = fforce[0];
+  fnn[1] = fforce[1];
+  fnn[2] = fforce[2];
+  
+  /* unset non-touching neighbors*/
+  //if( h12 > 0.0 ){
+  if( h12 > hf[type[i]][type[j]] ){
+    touch[jj] = 0;
+    history = &allhistory[size_history*jj];
+    for (int k = 0; k < size_history; k++) history[k] = 0.0;
+  }else{
+  /* calculate tangential force */
+    /* relative translational velocity */
+    vr[0] = v[i][0] - v[j][0];
+    vr[1] = v[i][1] - v[j][1];
+    vr[2] = v[i][2] - v[j][2];
+    /* normal component */
+    vnnr = MathExtra::dot3(vr,r12hat);
+    vn[0] = vnnr*r12hat[0];
+    vn[1] = vnnr*r12hat[1];
+    vn[2] = vnnr*r12hat[2];
+    /* tangential component */
+    vt[0] = vr[0] - vn[0];
+    vt[1] = vr[1] - vn[1];
+    vt[2] = vr[2] - vn[2];
+    //debug
+    //printf("%e %e %e %e\n", h12, r12hat[0], r12hat[1], r12hat[2]);
+    //printf("%e %e %e %e\n", h12, vt[0], vt[1], vt[2]);
+
+    /* principal moments of inertia */
+    inertia[0] = rmass[i] * (shape1[type[i]][1]*shape1[type[i]][1]+shape1[type[i]][2]*shape1[type[i]][2]) / 5.0;
+    inertia[1] = rmass[i] * (shape1[type[i]][0]*shape1[type[i]][0]+shape1[type[i]][2]*shape1[type[i]][2]) / 5.0;
+    inertia[2] = rmass[i] * (shape1[type[i]][0]*shape1[type[i]][0]+shape1[type[i]][1]*shape1[type[i]][1]) / 5.0;
+
+    /* angular velocity : wbody = angular velocity in xyz coordination system */
+    iquat = bonus[ellipsoid[i]].quat;
+    MathExtra::quat_to_mat(iquat,rot);
+    MathExtra::transpose_matvec(rot,angmom[i],tmp_iwbody);
+    /*iwbody[0] = angmom[i][0]/inertia[0];
+    iwbody[1] = angmom[i][1]/inertia[1];
+    iwbody[2] = angmom[i][2]/inertia[2];*/
+    tmp_iwbody[0] /= inertia[0];
+    tmp_iwbody[1] /= inertia[1];
+    tmp_iwbody[2] /= inertia[2];
+    MathExtra::matvec(rot,tmp_iwbody,iwbody);
+
+    /* principal moments of inertia */
+    inertia[0] = rmass[j] * (shape1[type[j]][1]*shape1[type[j]][1]+shape1[type[j]][2]*shape1[type[j]][2]) / 5.0;
+    inertia[1] = rmass[j] * (shape1[type[j]][0]*shape1[type[j]][0]+shape1[type[j]][2]*shape1[type[j]][2]) / 5.0;
+    inertia[2] = rmass[j] * (shape1[type[j]][0]*shape1[type[j]][0]+shape1[type[j]][1]*shape1[type[j]][1]) / 5.0;
+
+    /* angular velocity : wbody = angular velocity in xyz coordination system */
+    jquat = bonus[ellipsoid[j]].quat;
+    MathExtra::quat_to_mat(jquat,rot);
+    MathExtra::transpose_matvec(rot,angmom[j],tmp_jwbody);
+    /*jwbody[0] = angmom[j][0]/inertia[0];
+    jwbody[1] = angmom[j][1]/inertia[1];
+    jwbody[2] = angmom[j][2]/inertia[2];*/
+    tmp_jwbody[0] /= inertia[0];
+    tmp_jwbody[1] /= inertia[1];
+    tmp_jwbody[2] /= inertia[2];
+    MathExtra::matvec(rot,tmp_jwbody,jwbody);
+
+    //debug
+    //printf("%d %e %e %e %e \n", i, h12, iwbody[0], iwbody[1], iwbody[2]);
+    //printf("%e %d %e %e %e %d %e %e %e\n", h12, i, angmom[i][0], angmom[i][1], angmom[i][2], j, angmom[j][0], angmom[j][1], angmom[j][2]);
+
+    /* contacr point */
+    xca[0]=x[i][0]-xa[0];
+    xca[1]=x[i][1]-xa[1];
+    xca[2]=x[i][2]-xa[2];
+    xcb[0]=xb[0]-x[j][0];
+    xcb[1]=xb[1]-x[j][1];
+    xcb[2]=xb[2]-x[j][2];
+    //debug
+    //printf("%e %d %e %e %e %d %e %e %e\n", h12, i, xca[0], xca[1], xca[2], j, xcb[0], xcb[1], xcb[2]);
+    
+    /*relative rotational velocity*/
+    vrr[0] = (xca[2]*iwbody[1]-xca[1]*iwbody[2]) + (xcb[2]*jwbody[1]-xcb[1]*jwbody[2]);
+    vrr[1] = (xca[0]*iwbody[2]-xca[2]*iwbody[0]) + (xcb[0]*jwbody[2]-xcb[2]*jwbody[0]);
+    vrr[2] = (xca[1]*iwbody[0]-xca[0]*iwbody[1]) + (xcb[1]*jwbody[0]-xcb[0]*jwbody[1]);
+    //debug
+    //printf("%e %e %e %e\n", h12, vrr[0], vrr[1], vrr[2]);
+
+    /* normal component */
+    vnnr = MathExtra::dot3(vrr,r12hat);
+    vnr[0] = vnnr*r12hat[0];
+    vnr[1] = vnnr*r12hat[1];
+    vnr[2] = vnnr*r12hat[2];
+    /* tangential component */
+    vt[0] -= vrr[0] - vnr[0];
+    vt[1] -= vrr[1] - vnr[1];
+    vt[2] -= vrr[2] - vnr[2];
+
+    //debug
+    //printf("%e %e %e %e\n", h12, vt[0], vt[1], vt[2]);
+    
+    /* shear history effects */
+    touch[jj] = 1;
+    history = &allhistory[size_history*jj];
+    if(shearupdate){
+      history[0] += vt[0]*dt;
+      history[1] += vt[1]*dt;
+      history[2] += vt[2]*dt;
+    }
+    shrmag = sqrt(history[0]*history[0] + history[1]*history[1] + history[2]*history[2]);
+
+    /* rotate shear displacements */
+    rsht = MathExtra::dot3(history,r12hat);
+    if(shearupdate){
+      history[0] -= rsht*r12hat[0];
+      history[1] -= rsht*r12hat[1];
+      history[2] -= rsht*r12hat[2];
+    }
+
+    // mean mass : meff = effective mass of pair of particles */
+    mi = rmass[i];
+    mj = rmass[j];
+    meff = mi*mj / (mi+mj);
+
+    /* tangential forces = shear + tangential velocity damping */
+    fss[0] = - (kt[type[i]][type[j]]*history[0] + meff*gamma_t[type[i]][type[j]]*vt[0]);
+    fss[1] = - (kt[type[i]][type[j]]*history[1] + meff*gamma_t[type[i]][type[j]]*vt[1]);
+    fss[2] = - (kt[type[i]][type[j]]*history[2] + meff*gamma_t[type[i]][type[j]]*vt[2]);
+
+    /* rescale frictional displacements and forces if needed */
+    fs = sqrt(fss[0]*fss[0] + fss[1]*fss[1] + fss[2]*fss[2]);
+
+    /* Hookean contacr model */
+    if(DEM_flag == 1){
+      //fn = fabs(kn[type[i]][type[j]]*h12); /* No damping */
+      /*fnn[0] = kn[type[i]][type[j]]*fabs(h12)*r12hat[0] - meff*gamma_n[type[i]][type[j]]*vn[0];
+      fnn[1] = kn[type[i]][type[j]]*fabs(h12)*r12hat[1] - meff*gamma_n[type[i]][type[j]]*vn[1];
+      fnn[2] = kn[type[i]][type[j]]*fabs(h12)*r12hat[2] - meff*gamma_n[type[i]][type[j]]*vn[2];*/
+      temp2 = MathExtra::dot3(kappa,r12hat);
+      fnn[0] = -kn[type[i]][type[j]]*h12*r12hat[0] - rsqinv*0.5*kn[type[i]][type[j]]*h12*pow(sigma12,3.0)*(kappa[0]-temp2*r12hat[0]);
+      fnn[1] = -kn[type[i]][type[j]]*h12*r12hat[1] - rsqinv*0.5*kn[type[i]][type[j]]*h12*pow(sigma12,3.0)*(kappa[1]-temp2*r12hat[1]);
+      fnn[2] = -kn[type[i]][type[j]]*h12*r12hat[2] - rsqinv*0.5*kn[type[i]][type[j]]*h12*pow(sigma12,3.0)*(kappa[2]-temp2*r12hat[2]);
+      fnk[0] = - rsqinv*0.5*kn[type[i]][type[j]]*h12*pow(sigma12,3.0)*kappa[0];
+      fnk[1] = - rsqinv*0.5*kn[type[i]][type[j]]*h12*pow(sigma12,3.0)*kappa[1];
+      fnk[2] = - rsqinv*0.5*kn[type[i]][type[j]]*h12*pow(sigma12,3.0)*kappa[2];
+      fn = sqrt(fnn[0]*fnn[0] + fnn[1]*fnn[1] + fnn[2]*fnn[2]);
+    /* Non contacr model : Gay-Berne potential */
+    }else{
+      fn = MathExtra::dot3(fforce,r12hat);
+      fn = sqrt(fn*fn);
+    }
+    fn *= xmu[type[i]][type[j]];
+
+    if (fabs(fs) > fn) {
+      if (shrmag != 0.0) {
+        history[0] = (fn/fs) * (history[0] + meff*gamma_t[type[i]][type[j]]*vt[0]/kt[type[i]][type[j]]) - meff*gamma_t[type[i]][type[j]]*vt[0]/kt[type[i]][type[j]];
+        history[1] = (fn/fs) * (history[1] + meff*gamma_t[type[i]][type[j]]*vt[1]/kt[type[i]][type[j]]) - meff*gamma_t[type[i]][type[j]]*vt[1]/kt[type[i]][type[j]];
+        history[2] = (fn/fs) * (history[2] + meff*gamma_t[type[i]][type[j]]*vt[2]/kt[type[i]][type[j]]) - meff*gamma_t[type[i]][type[j]]*vt[2]/kt[type[i]][type[j]];
+        fss[0] *= fn/fs;
+        fss[1] *= fn/fs;
+        fss[2] *= fn/fs;
+      } else{
+        fss[0] = 0.0;
+        fss[1] = 0.0;
+        fss[2] = 0.0;
+      }
+    }
+    //debug
+    //printf("%d %e %e %e %e %e %e \n", i, fnn[0], fnn[1], fnn[2], fss[0], fss[1], fss[2]);
+
+    /* force */
+    if(DEM_flag == 1){
+      fforce[0] += fss[0] - fnn[0];
+      fforce[1] += fss[1] - fnn[1];
+      fforce[2] += fss[2] - fnn[2];
+    }else{
+      fforce[0] += fss[0];
+      fforce[1] += fss[1];
+      fforce[2] += fss[2];
+    }
+    
+    /* torque */
+    if(DEM_flag == 1){
+      MathExtra::vecmat(kappa,g1,xca);
+      MathExtra::cross3(xca,fnk,itor);
+      ttor[0] -= itor[0];
+      ttor[1] -= itor[1];
+      ttor[2] -= itor[2];
+      if (newton_pair || j < nlocal) {
+        MathExtra::vecmat(kappa,g2,xcb);
+        MathExtra::cross3(xcb,fnk,jtor);
+        rtor[0] -= jtor[0];
+        rtor[1] -= jtor[1];
+        rtor[2] -= jtor[2];
+      }
+    }
+
+    f_torque[0] = fss[0];
+    f_torque[1] = fss[1];
+    f_torque[2] = fss[2];
+    MathExtra::vecmat(kappa,g1,xca);
+    MathExtra::cross3(xca,f_torque,itor);
+    ttor[0] += itor[0];
+    ttor[1] += itor[1];
+    ttor[2] += itor[2];
+    if (newton_pair || j < nlocal) {
+      f_torque[0] = fss[0];
+      f_torque[1] = fss[1];
+      f_torque[2] = fss[2];
+      MathExtra::vecmat(kappa,g2,xcb);
+      MathExtra::cross3(xcb,f_torque,jtor);
+      rtor[0] += jtor[0];
+      rtor[1] += jtor[1];
+      rtor[2] += jtor[2];
+    }
+    //printf("%e %e %e %e %e %e %e \n", h12, ttor[0], ttor[1], ttor[2],rtor[0], rtor[1], rtor[2]);
+    //printf("%e %d %e %e %e %d %e %e %e\n", h12, i, ttor[0], ttor[1], ttor[2], j, rtor[0], rtor[1], rtor[2]);
+    //printf("%e %d %e %e %e %e %e %e\n", h12, j, f_torque[0], f_torque[1], f_torque[2], xcb[0], xcb[1], xcb[2]);
+  }
+
+  /*--------------- Debug ---------------*/
+  //printf("%d %f %d %f %f %f %f\n", i, x[i][2], j, x[j][2], history[0], history[1], history[2] );
+  //printf("%d %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e \n", i, h12, r12hat[0], r12hat[1], r12hat[2], kappa[0], kappa[1], kappa[2] );
+  //printf("%d %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e \n", i, h12, stiffness[type[i]][type[j]]*history[0], stiffness[type[i]][type[j]]*history[1], stiffness[type[i]][type[j]]*history[2], meff*damping[type[i]][type[j]]*vt[0], meff*damping[type[i]][type[j]]*vt[1], meff*damping[type[i]][type[j]]*vt[2] );
+  //printf("%d %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e \n", i, h12, fforce[0], fforce[1], fforce[2], ttor[0], ttor[1], ttor[2] );
+  //double nfforcenr, nfforce[3], sfforce[3];
+  //nfforcenr = MathExtra::dot3(fforce,r12hat);
+  //nfforce[0] = nfforcenr*r12hat[0];
+  //nfforce[1] = nfforcenr*r12hat[1];
+  //nfforce[2] = nfforcenr*r12hat[2];
+  //sfforce[0] = fforce[0]-nfforce[0];
+  //sfforce[1] = fforce[1]-nfforce[1];
+  //sfforce[2] = fforce[2]-nfforce[2];
+  //MathExtra::vecmat(kappa,g1,xca);
+  //MathExtra::cross3(xca,sfforce,itor);
+  //printf("%d %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e \n", i, h12, sfforce[0], sfforce[1], sfforce[2], itor[0], itor[1], itor[2] );
+  //printf("%d %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e \n", i, h12, fforce[0], fforce[1], fforce[2], v[i][0], v[i][1], v[i][2] );
+  //printf("%d %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e %10.5e \n", i, h12, fss[0], fss[1], fss[2], v[i][0], v[i][1], v[i][2] );
+  //printf("%d %e %e %e %e %e %e %e %e %e %e %e %e \n", i, history[0], history[1], history[2], fforce[0], fforce[1], fforce[2], fss[0], fss[1], fss[2], angmom[i][0], angmom[i][1], angmom[i][2]);
+  //printf("%d %e %e %e %e %e %e %e %e %e \n", i, history[0], history[1], history[2], fforce[0], fforce[1], fforce[2], fss[0], fss[1], fss[2]);
+  //printf("%e %e %e %e %e %e %e \n", h12, fforce[0], fforce[1], fforce[2], r12hat[0], r12hat[1], r12hat[2]);
+  //printf("%e \n", h12 );
+  //printf("%e %e %e %e \n", h12, r12hat[0], r12hat[1], r12hat[2]);
+  //printf("%d %e %e %e %e \n", ntimestep, h12, history[0], history[1], history[2] );
+  //printf("%d\n", DEM_flag);
+  //printf("%e %e \n", kn[type[i]][type[j]], kt[type[i]][type[j]]);
+  /*-------------------------------------*/
+
+  /*--------------- Debug ---------------*/
+  //if( (ntimestep-15200000)%100000 == 0.0 ){
+  if( C_flag == 1 && ntimestep%interval == 0.0 ){
+    FILE *fp;
+    char filename[30];
+    sprintf(filename, "contact_debug_%d.txt", ntimestep);
+    fp = fopen(filename,"a");
+    fprintf(fp, "%e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n", x[i][0], x[i][1], x[i][2], x[j][0], x[j][1], x[j][2], fnn[0], fnn[1], fnn[2], fss[0], fss[1], fss[2], history[0], history[1], history[2], h12);
+    fclose(fp);
+  }
+  /*-------------------------------------*/
+
+  //printf("%e %e %e\n", h12, u_gb*eta*chi, fforce[2]);
+  
+  /* potential energy */
+  double pe = u_gb*eta*chi;
+  if(DEM_flag == 1) pe = 0.0;
+  return pe;
+  /*-----------------------------------------------------------*/
 }
 
 /* ----------------------------------------------------------------------
@@ -947,3 +1813,345 @@ void PairGayBerne::compute_eta_torque(double m[3][3], double m2[3][3],
                     2.0*m[1][1]*m2[2][2]*m[0][0]+m[2][1]*m[1][0]*m2[2][0]+
                     m[2][0]*m[0][1]*m2[2][1]-2.0*m2[2][2]*m[1][0]*m[0][1])/den;
 }
+//______________________________________________________________________________________________________________________
+/***********************************************************************************************************************
+   ellipsoids
+***********************************************************************************************************************/
+double PairGayBerne::ellipsoids(void){
+
+  int j;
+  double sol;
+  double a,b,theta1,theta2,theta3,theta4,f1,f4,f3,f5,f6; //Search algorithm variables
+
+  norm(di,d);
+  norm(l1i,l1);
+  norm(l2i,l2);
+  norm(m1i,m1);
+  norm(m2i,m2);
+  norm(n1i,n1);
+  norm(n2i,n2);
+  crossP(d,l1,dxp0);
+  if(mag(dxp0)<1.E-14) crossP(d,m1,dxp0);
+  norm(dxp0,p0);
+  crossP(p0,d,dxp0);
+  theta1=0.0;
+  theta2=pi;
+  theta3=theta1+o1g*(theta2-theta1);
+  theta4=theta2-o1g*(theta2-theta1);
+  f1=plane_int(theta1);
+  f3=plane_int(theta3);
+  f4=plane_int(theta4);
+
+  /*--- search algorithm loop ---*/
+  while(theta2-theta1>tolerance){
+    if((f1<=f3 && f3<=f4) || (f3<=f1 && f1<=f4)){  //case a
+      theta1=theta3;
+      f1=f3;
+      theta3=theta4;
+      f3=f4;
+      theta4=theta2-o1g*(theta2-theta1);
+      f4=plane_int(theta4);
+    }else if((f1<=f4 && f4<=f3) || (f4<=f1 && f1<=f3)){ //case b
+      theta2=theta4;
+      theta4=theta3;
+      f4=f3;
+      theta3=theta1+o1g*(theta2-theta1);
+      f3=plane_int(theta3);
+    }else{ //case c
+      f5=plane_int(theta1+delt);
+      if(f5>f1){
+        theta2=theta3;
+              theta3=theta1+o1g*(theta2-theta1);
+              theta4=theta2-o1g*(theta2-theta1);
+              f3=plane_int(theta3);
+              f4=plane_int(theta4);
+      }else{
+              f6=plane_int(theta1-delt);
+              if(f6<f1){
+                theta2=theta3;
+                theta3=theta1+o1g*(theta2-theta1);
+                theta4=theta2-o1g*(theta2-theta1);
+                f3=plane_int(theta3);
+                f4=plane_int(theta4);
+                }else{
+                  theta1=theta4;
+                  f1=f4;
+                  theta3=theta1+o1g*(theta2-theta1);
+                  theta4=theta2-o1g*(theta2-theta1);
+                  f3=plane_int(theta3);
+                  f4=plane_int(theta4);
+                }
+            }
+        }
+    }
+    /*--- search algorithm loop end ---*/
+
+    /*--- return ---*/
+    sol=f4;
+    return sol;
+}
+//______________________________________________________________________________________________________________________
+/***********************************************************************************************************************
+   Cross Product of two vectors
+***********************************************************************************************************************/
+void PairGayBerne::crossP(double x[3],double y[3],double z[3]){
+
+  z[0]=x[1]*y[2]-x[2]*y[1];
+  z[1]=x[2]*y[0]-x[0]*y[2];
+  z[2]=x[0]*y[1]-x[1]*y[0];
+
+}
+//______________________________________________________________________________________________________________________
+/***********************************************************************************************************************
+   Normalization of a vector
+***********************************************************************************************************************/
+void PairGayBerne::norm(double vec[3],double nvec[3]){
+
+  double length;
+  length=mag(vec);
+
+  if(length==0.0){
+    nvec[0]=0.0;nvec[1]=0.0;nvec[2]=0.0;
+  }else{
+    nvec[0]=vec[0]/length;
+    nvec[1]=vec[1]/length;
+    nvec[2]=vec[2]/length;
+  }
+
+}
+//______________________________________________________________________________________________________________________
+/***********************************************************************************************************************
+   Magnitude of a vector
+***********************************************************************************************************************/
+double PairGayBerne::mag(double V[3]){
+
+  return sqrt(V[0]*V[0]+V[1]*V[1]+V[2]*V[2]);
+
+}
+//______________________________________________________________________________________________________________________
+/***********************************************************************************************************************
+   Dot Product of two vectors
+***********************************************************************************************************************/
+double PairGayBerne::dotP(double Vec1[3],double Vec2[3]){
+
+  return Vec1[0]*Vec2[0]+Vec1[1]*Vec2[1]+Vec1[2]*Vec2[2];
+
+}
+//______________________________________________________________________________________________________________________
+/***********************************************************************************************************************
+   Ellipses formed with the intersection of the ellipsoid with the plane
+***********************************************************************************************************************/
+double PairGayBerne::plane_int(double theta){
+
+  double alpha1,beta1,gamma1,v1,u1,alpha2,beta2,gamma2,v2,u2;
+  double e1,e2;
+  double l1x,l1y,m1x,m1y,n1x,n1y,l2x,l2y,m2x,m2y,n2x,n2y;
+  double a2d1,a2d2,b2d1,b2d2,angle1,angle2; //Ellipses variables
+  double quad[4], mat[3][3];
+  int j, k;
+  for(j=0;j<3;j++) p[j]=cos(theta)*p0[j]+sin(theta)*dxp0[j];
+
+  crossP(p,d,s);
+
+  /*particle 1*/
+  l1x=dotP(l1,d);
+  l1y=dotP(l1,s);
+  m1x=dotP(m1,d);
+  m1y=dotP(m1,s);
+  n1x=dotP(n1,d);
+  n1y=dotP(n1,s);
+  alpha1=l1x*l1x/(A1*A1)+m1x*m1x/(B1*B1)+n1x*n1x/(C1*C1);
+  beta1=l1y*l1x/(A1*A1)+m1y*m1x/(B1*B1)+n1x*n1y/(C1*C1);
+  gamma1=l1y*l1y/(A1*A1)+m1y*m1y/(B1*B1)+n1y*n1y/(C1*C1);
+  v1=sqrt(4.0*beta1*beta1+(alpha1-gamma1)*(alpha1-gamma1));
+  angle1=0.5*atan2(-2.0*beta1,-(alpha1-gamma1));
+  u1=gamma1+v1*sin(angle1)*sin(angle1);
+  b2d1=1.0/sqrt(u1);
+  a2d1=1./sqrt(u1-v1);
+
+  /*particle 1*/
+  l2x=dotP(l2,d);
+  l2y=dotP(l2,s);
+  m2x=dotP(m2,d);
+  m2y=dotP(m2,s);
+  n2x=dotP(n2,d);
+  n2y=dotP(n2,s);
+  alpha2=l2x*l2x/(A2*A2)+m2x*m2x/(B2*B2)+n2x*n2x/(C2*C2);
+  beta2=l2y*l2x/(A2*A2)+m2y*m2x/(B2*B2)+n2x*n2y/(C2*C2);
+  gamma2=l2y*l2y/(A2*A2)+m2y*m2y/(B2*B2)+n2y*n2y/(C2*C2);
+  v2=sqrt(4.0*beta2*beta2+(alpha2-gamma2)*(alpha2-gamma2));
+  angle2=0.5*atan2(-2.0*beta2,-(alpha2-gamma2));
+  u2=gamma2+v2*sin(angle2)*sin(angle2);
+  b2d2=1.0/sqrt(u2);
+  a2d2=1.0/sqrt(u2-v2);
+
+  /*calculate major axes oriented along the unit vectors*/
+  for(k=0;k<3;k++) k1[k] = cos(angle1)*d[k]+sin(angle1)*s[k];
+  for(k=0;k<3;k++) k2[k] = cos(angle2)*d[k]+sin(angle2)*s[k];
+
+  /*calculate minor axes oriented along the unit vectors*/
+  for(k=0;k<3;k++) kn1[k] = -sin(angle1)*d[k]+cos(angle1)*s[k];
+
+  /*return*/
+  return distance2d(a2d1,b2d1,a2d2,b2d2,angle1,angle2);
+
+}
+//______________________________________________________________________________________________________________________
+/***********************************************************************************************************************
+   Distance of Closest Approach of two arbitrary ellipses
+***********************************************************************************************************************/
+double PairGayBerne::distance2d(double a1, double b1, double a2, double b2, double angle1, double angle2){
+
+  double eps1,eps2,k1dotd,k2dotd,k1dotk2,nu,Ap[2][2],lambdaplus,lambdaminus,bp2,ap2,cosphi,tanphi2,delta,dp;
+  complex<double> A,B,C,D,E,alpha,beta,gamma,P,Q,U,y,qu;
+  /*---YN:23July2022---*/
+   double sps, cps, sinphi, rp, rm, ami, bmi, ama, bma;
+   double error = 1.0e-10;
+   /*-------------------*/
+
+  //the fix on July 2012 
+  if(fabs(angle2-angle1)==pi){
+    angle2=angle1;
+   }
+
+   eps1=sqrt(1.0-(b1*b1)/(a1*a1));
+   eps2=sqrt(1.0-(b2*b2)/(a2*a2));
+   k1dotd=cos(angle1);
+   k2dotd=cos(angle2);
+   k1dotk2=cos(angle2-angle1);
+   nu=a1/b1-1.0;
+
+   Ap[0][0]=b1*b1/(b2*b2)*(1.0+0.5*(1.0+k1dotk2)*(nu*(2.0+nu)-eps2*eps2*(1.0+nu*k1dotk2)*(1.0+nu*k1dotk2)));
+   Ap[1][1]=b1*b1/(b2*b2)*(1.0+0.5*(1.0-k1dotk2)*(nu*(2.0+nu)-eps2*eps2*(1.0-nu*k1dotk2)*(1.0-nu*k1dotk2)));
+   Ap[0][1]=b1*b1/(b2*b2)*0.5*sqrt(1.0-k1dotk2*k1dotk2)*(nu*(2.0+nu)+eps2*eps2*(1.0-nu*nu*k1dotk2*k1dotk2));
+
+   lambdaplus  = 0.5*(Ap[0][0]+Ap[1][1])+sqrt(0.25*(Ap[0][0]-Ap[1][1])*(Ap[0][0]-Ap[1][1])+Ap[0][1]*Ap[0][1]);
+   lambdaminus = 0.5*(Ap[0][0]+Ap[1][1])-sqrt(0.25*(Ap[0][0]-Ap[1][1])*(Ap[0][0]-Ap[1][1])+Ap[0][1]*Ap[0][1]);
+    
+   bp2=1.0/sqrt(lambdaplus);
+   ap2=1.0/sqrt(lambdaminus);
+
+   //if(fabs(k1dotk2)==1.0){
+   if(fabs(k1dotk2-1.0) < error){
+    if(Ap[0][0]>Ap[1][1]){
+       cosphi=b1/a1*k1dotd/sqrt(1.0-eps1*eps1*k1dotd*k1dotd);
+       /*---YN:23July2022---*/
+       sinphi=sqrt(1.0-k1dotd*k1dotd)/sqrt(1.0-eps1*eps1*k1dotd*k1dotd);
+       /*-------------------*/
+      }else{
+        cosphi=sqrt(1.0-k1dotd*k1dotd)/sqrt(1.0-eps1*eps1*k1dotd*k1dotd);
+        /*---YN:23July2022---*/
+        sinphi=b1/a1*k1dotd/sqrt(1.0-eps1*eps1*k1dotd*k1dotd);
+        /*-------------------*/
+      }
+   }else{
+      cosphi= 1.0/sqrt(2.0*(Ap[0][1]*Ap[0][1]+(lambdaplus-Ap[0][0])*(lambdaplus-Ap[0][0]))*(1.0-eps1*eps1*k1dotd*k1dotd))
+             *(Ap[0][1]/sqrt(1.0+k1dotk2)*(b1/a1*k1dotd+k2dotd+(b1/a1-1.0)*k1dotd*k1dotk2)
+              +(lambdaplus-Ap[0][0])/sqrt(1.0-k1dotk2)*(b1/a1*k1dotd-k2dotd-(b1/a1-1.0)*k1dotd*k1dotk2));
+      /*---YN:23July2022---*/
+      sinphi= 1.0/sqrt(2.0*(Ap[0][1]*Ap[0][1]+(lambdaplus-Ap[0][0])*(lambdaplus-Ap[0][0]))*(1.0-eps1*eps1*k1dotd*k1dotd))
+             *((-(lambdaplus-Ap[0][0])/sqrt(1.0+k1dotk2))*(b1/a1*k1dotd+k2dotd+(b1/a1-1.0)*k1dotd*k1dotk2)
+              + Ap[0][1]/sqrt(1.0-k1dotk2)*(b1/a1*k1dotd-k2dotd-(b1/a1-1.0)*k1dotd*k1dotk2));
+      /*-------------------*/
+   }
+   delta=ap2*ap2/(bp2*bp2)-1.0;
+
+   //if(delta==0.0 || cosphi==0.0){
+   if(fabs(delta) < error || fabs(cosphi) < error){
+      dp=1.0+ap2;
+      /*---YN:23July2022---*/
+      xt1[0] = xc1[0] + b1/sqrt(1.0-eps1*eps1*k1dotd*k1dotd)*d[0];
+      xt1[1] = xc1[1] + b1/sqrt(1.0-eps1*eps1*k1dotd*k1dotd)*d[1];
+      xt1[2] = xc1[2] + b1/sqrt(1.0-eps1*eps1*k1dotd*k1dotd)*d[2];
+      /*-------------------*/
+   }else{
+      tanphi2=1.0/(cosphi*cosphi)-1.0;
+      A=-(1.0+tanphi2)/(bp2*bp2);
+      B=-2.0*(1.0+tanphi2+delta)/bp2;
+      C=-tanphi2-(1.0+delta)*(1.0+delta)+(1.0+(1.0+delta)*tanphi2)/(bp2*bp2);
+      D=2.0*(1.0+tanphi2)*(1.0+delta)/bp2;
+      E=(1.0+tanphi2+delta)*(1.0+delta);
+      alpha=-3.0*B*B/(8.0*A*A)+C/A;
+      beta=B*B*B/(8.0*A*A*A)-B*C/(2.0*A*A)+D/A;
+      gamma=-3.0*B*B*B*B/(256.0*A*A*A*A)+C*B*B/(16.0*A*A*A)-B*D/(4.0*A*A)+E/A;
+
+      //if(beta==0.0){
+      if(fabs(beta) < error){
+        //qu=-B/(4.0*A)+csqrt(0.5*(-alpha+csqrt(alpha*alpha-4.0*gamma)));
+        qu=-B/(4.0*A)+sqrt(0.5*(-alpha+sqrt(alpha*alpha-4.0*gamma)));
+      }else{
+          P=-alpha*alpha/12.0-gamma;
+          Q=-alpha*alpha*alpha/108.0+alpha*gamma/3.0-beta*beta/8.0;
+          //U=c_cbrt(-Q*0.5+csqrt(Q*Q*0.25+P*P*P/27.0));
+          U=c_cbrt(-Q*0.5+sqrt(Q*Q*0.25+P*P*P/27.0));
+
+          if(U==0.0) y=-5.0*alpha/6.0-c_cbrt(Q);
+          else y=-5.0*alpha/6.0+U-P/(3.0*U);
+
+          //qu=-B/(4.0*A)+0.5*(csqrt(alpha+2.0*y)+csqrt(-(3.0*alpha+2.0*y+2.0*beta/csqrt(alpha+2.0*y))));
+          qu=-B/(4.0*A)+0.5*(sqrt(alpha+2.0*y)+sqrt(-(3.0*alpha+2.0*y+2.0*beta/sqrt(alpha+2.0*y))));
+      }
+
+      /*---YN:23July2022---*/
+      sps = double (real(sqrt((qu*qu-1.0)/delta)));
+      cps = double (real(sqrt(1.0-(qu*qu-1.0)/delta)));
+      if(sinphi<0.0) sps = -fabs(sps);
+      if(cosphi<0.0) cps = -fabs(cps);
+
+      //if(fabs(k1dotk2)==1.0){
+      if(fabs(k1dotk2-1.0) < error){
+        if(Ap[0][0]>Ap[1][1]){
+          xt1[0] = xc1[0] + a1*cps*k1[0]+b1*sps*kn1[0];
+          xt1[1] = xc1[1] + a1*cps*k1[1]+b1*sps*kn1[1];
+          xt1[2] = xc1[2] + a1*cps*k1[2]+b1*sps*kn1[2];
+        }else{
+          xt1[0] = xc1[0] + a1*sps*k1[0]+b1*cps*kn1[0];
+          xt1[1] = xc1[1] + a1*sps*k1[1]+b1*cps*kn1[1];
+          xt1[2] = xc1[2] + a1*sps*k1[2]+b1*cps*kn1[2];
+        }
+      }else{
+        rp = sqrt(1.0+k1dotk2);
+        rm = sqrt(1.0-k1dotk2);
+
+        ami = (1.0/sqrt(2.0*(Ap[0][1]*Ap[0][1]+(lambdaplus-Ap[0][0])*(lambdaplus-Ap[0][0]))))*Ap[0][1];
+        bmi = (1.0/sqrt(2.0*(Ap[0][1]*Ap[0][1]+(lambdaplus-Ap[0][0])*(lambdaplus-Ap[0][0]))))*(lambdaplus-Ap[0][0]);
+
+        ama = cps*(ami/rp+bmi/rm) + sps*(ami/rm-bmi/rp);
+        bma = cps*(ami/rp-bmi/rm) - sps*(ami/rm+bmi/rp);
+
+        xt1[0] = xc1[0] + ama*a1*k1[0]+bma*(a1-b1)*k1dotk2*k1[0]+bma*b1*k2[0];
+        xt1[1] = xc1[1] + ama*a1*k1[1]+bma*(a1-b1)*k1dotk2*k1[1]+bma*b1*k2[1];
+        xt1[2] = xc1[2] + ama*a1*k1[2]+bma*(a1-b1)*k1dotk2*k1[2]+bma*b1*k2[2];
+      }
+      /*-------------------*/
+
+      //dp=csqrt((qu*qu-1.0)/delta*(1.0+bp2*(1.0+delta)/qu)*(1.0+bp2*(1.0+delta)/qu)+(1.0-(qu*qu-1.0)/delta)*(1.0+bp2/qu)*(1.0+bp2/qu));
+      dp = double(real( sqrt((qu*qu-1.0)/delta*(1.0+bp2*(1.0+delta)/qu)*(1.0+bp2*(1.0+delta)/qu)+(1.0-(qu*qu-1.0)/delta)*(1.0+bp2/qu)*(1.0+bp2/qu)) ));
+   }
+
+   /*return*/
+   return dp*b1/sqrt(1.0-eps1*eps1*k1dotd*k1dotd);
+
+}
+//______________________________________________________________________________________________________________________
+/***********************************************************************************************************************
+   Principal cubic root of a complex number
+***********************************************************************************************************************/
+complex<double> PairGayBerne::c_cbrt( complex<double> x){
+
+  double a,b,r,phi,rn;
+
+  //a=creal(x);
+  a = real(x);
+  //b=cimag(x);
+  b = imag(x);
+  r=sqrt(a*a+b*b);
+  phi=atan2(b,a);
+  phi/=3.0;
+  rn=cbrt(r);
+
+    /*return*/
+  return complex<double>( rn*cos(phi), rn*sin(phi) );
+
+}
+//______________________________________________________________________________________________________________________
