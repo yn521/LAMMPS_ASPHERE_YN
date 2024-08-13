@@ -181,7 +181,8 @@ void Domain::set_initial_box(int expandflag)
 
   // error check or warning on triclinic tilt factors
 
-  if (triclinic) {
+  /* modified by Yohei Nakamichi 25/10/2023*/
+  /*if (triclinic) {
     if ((fabs(xy/(boxhi[0]-boxlo[0])) > 0.5 && xperiodic) ||
         (fabs(xz/(boxhi[0]-boxlo[0])) > 0.5 && xperiodic) ||
         (fabs(yz/(boxhi[1]-boxlo[1])) > 0.5 && yperiodic)) {
@@ -190,7 +191,7 @@ void Domain::set_initial_box(int expandflag)
       else if (comm->me == 0)
         error->warning(FLERR,"Triclinic box skew is large");
     }
-  }
+  }*/
 
   // set small based on box size and SMALL
   // this works for any unit system
