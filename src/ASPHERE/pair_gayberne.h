@@ -22,14 +22,16 @@ PairStyle(gayberne,PairGayBerne)
 
 #include "pair.h"
 
-/*--------------- Modified by Yohei Nakamichi ---------------*/
+/* ----------------------------------------------------------------------
+   modified by Yohei Nakamichi
+------------------------------------------------------------------------- */
 #include<stdio.h>
 #include<math.h>
 #include<errno.h>
 #include<stdlib.h>
 #include<complex>
 using namespace std;
-/*-----------------------------------------------------------*/
+/* ---------------------------------------------------------------------- */
 
 namespace LAMMPS_NS {
 
@@ -61,7 +63,10 @@ class PairGayBerne : public Pair {
   double *lshape;            // precalculation based on the shape
   double **well;             // well depth scaling along each axis ^ -1.0/mu
   double **epsilon,**sigma;  // epsilon and sigma values for atom-type pairs
-  /*--------------- Modified by Yohei Nakamichi ---------------*/
+
+/* ----------------------------------------------------------------------
+   modified by Yohei Nakamichi
+------------------------------------------------------------------------- */
   double **gammasb;    // gammasb values for atom-type pairs
   double **cfa, **cfb, **cfc;
   double **kn, **kt, **gamma_n, **gamma_t, **xmu; //friction model parameters
@@ -85,7 +90,9 @@ class PairGayBerne : public Pair {
   int interval;
   /* set threshhold of friction */
   double **hf;
-  /*-----------------------------------------------------------*/
+  /* weight function parameters */
+  double A_const;
+/* ---------------------------------------------------------------------- */
 
   int **form;
   double **lj1,**lj2,**lj3,**lj4;
@@ -94,12 +101,16 @@ class PairGayBerne : public Pair {
   class AtomVecEllipsoid *avec;
 
   void allocate();
+  
+/* ----------------------------------------------------------------------
+   modified by Yohei Nakamichi
+------------------------------------------------------------------------- */
   /*double gayberne_analytic(const int i, const int j, double a1[3][3],
                            double a2[3][3], double b1[3][3], double b2[3][3],
                            double g1[3][3], double g2[3][3], double *r12,
                            const double rsq, double *fforce, double *ttor,
                            double *rtor);*/
-  /*--------------- Modified by Yohei Nakamichi ---------------*/
+/* ---------------------------------------------------------------------- */
   double gayberne_analytic(const int i, const int j, double a1[3][3],
                            double a2[3][3], double b1[3][3], double b2[3][3],
                            double g1[3][3], double g2[3][3], double *r12,
@@ -109,31 +120,23 @@ class PairGayBerne : public Pair {
                            double nveci[3], double nvecj[3],
                            const double cosi, const double cosj,
                            int *touch, double *history, double *allhistory, const int jj);
-  /*-----------------------------------------------------------*/
+/* ---------------------------------------------------------------------- */
+
   double gayberne_lj(const int i, const int j, double a1[3][3],
                      double b1[3][3],double g1[3][3],double *r12,
                      const double rsq, double *fforce, double *ttor);
   void compute_eta_torque(double m[3][3], double m2[3][3],
                           double *s, double ans[3][3]);
 
-  /*--------------- Modified by Yohei Nakamichi ---------------*/
-  void crossP(double *x,double *y,double *z);
-  void norm(double *vec,double *nvec);
-  double mag(double *V);
-  double dotP(double *Vec1,double *Vec2);
-  double plane_int(double); //
-  double distance2d(double,double,double,double,double,double); //
-  complex<double> c_cbrt( complex<double> ); //
-  double ellipsoids(void);
-  /*-----------------------------------------------------------*/
-
-  /*--------------- Modified by Yohei Nakamichi ---------------*/
+/* ----------------------------------------------------------------------
+   modified by Yohei Nakamichi
+------------------------------------------------------------------------- */
   int use_history;
   class FixNeighHistory *fix_history;
   int size_history;
   double dt;
   int ntimestep;
-  /*-----------------------------------------------------------*/
+/* ---------------------------------------------------------------------- */
 
 };
 

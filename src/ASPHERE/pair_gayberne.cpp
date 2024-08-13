@@ -29,9 +29,8 @@
 #include "memory.h"
 #include "error.h"
 #include "utils.h"
-
 /* ----------------------------------------------------------------------
-   Additional #include
+   Additional #include (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
 #include <cstring>
 #include "fix.h"
@@ -45,12 +44,12 @@ using namespace LAMMPS_NS;
 static const char cite_pair_gayberne[] =
   "pair gayberne command:\n\n"
   "@Article{Brown09,\n"
-  " author = {W. M. Brown, M. K. Petersen, S. J. Plimpton, and G. S. Grest},\n"
-  " title =  {Liquid crystal nanodroplets in solution},\n"
-  " journal ={J.~Chem.~Phys.},\n"
-  " year =   2009,\n"
-  " volume = 130,\n"
-  " pages =  {044901}\n"
+  " author =  {W. M. Brown, M. K. Petersen, S. J. Plimpton, and G. S. Grest},\n"
+  " title =   {Liquid crystal nanodroplets in solution},\n"
+  " journal = {J.~Chem.~Phys.},\n"
+  " year =    2009,\n"
+  " volume =  130,\n"
+  " pages =   {044901}\n"
   "}\n\n";
 
 /* ---------------------------------------------------------------------- */
@@ -63,7 +62,7 @@ PairGayBerne::PairGayBerne(LAMMPS *lmp) : Pair(lmp)
   writedata = 1;
 
 /* ----------------------------------------------------------------------
-   For calculation of friction
+   For calculation of friction (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   size_history = 3; 
   fix_history = NULL; 
@@ -80,12 +79,9 @@ PairGayBerne::PairGayBerne(LAMMPS *lmp) : Pair(lmp)
 
 PairGayBerne::~PairGayBerne()
 {
-
-/* ----------------------------------------------------------------------
-   For calculation of friction
-------------------------------------------------------------------------- */
-   if (fix_history) modify->delete_fix("NEIGH_HISTORY"); 
-/* ---------------------------------------------------------------------- */
+  /*--------------- Modified by Yohei Nakamichi ---------------*/
+  if (fix_history) modify->delete_fix("NEIGH_HISTORY");
+  /*-----------------------------------------------------------*/
 
   if (allocated) {
     memory->destroy(setflag);
@@ -106,7 +102,7 @@ PairGayBerne::~PairGayBerne()
     memory->destroy(offset);
 
 /* ----------------------------------------------------------------------
-   New variables
+   New variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
     memory->destroy(cfa);
     memory->destroy(cfb);
@@ -121,7 +117,6 @@ PairGayBerne::~PairGayBerne()
     memory->destroy(gamma_t);
     memory->destroy(xmu); 
 /* ---------------------------------------------------------------------- */
-
     delete [] lshape;
     delete [] setwell;
   }
@@ -139,7 +134,7 @@ void PairGayBerne::compute(int eflag, int vflag)
   double *iquat,*jquat;
 
 /* ----------------------------------------------------------------------
-   New variables
+   New variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   int k;
   double nveci[3], nvecj[3], dot_ni_r12, dot_nj_r12, norm_ni, norm_nj, 
@@ -168,7 +163,7 @@ void PairGayBerne::compute(int eflag, int vflag)
   firstneigh = list->firstneigh;
 
 /* ----------------------------------------------------------------------
-   For calculation of friction
+   For calculation of friction (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   firsttouch = fix_history->firstflag;
   firsthistory = fix_history->firstvalue;
@@ -191,7 +186,7 @@ void PairGayBerne::compute(int eflag, int vflag)
     //}
 
 /* ----------------------------------------------------------------------
-   For calculation of friction
+   For calculation of friction (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
     touch = firsttouch[i];
     allhistory = firsthistory[i]; 
@@ -266,6 +261,7 @@ void PairGayBerne::compute(int eflag, int vflag)
    face, type=2 represents Alumina face, and type=3 represents 
    edge. Important thing is that this code works for only mono-
    disperse sample - it doesn't work for poly disperse sample.
+   (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
           for(k=0; k<3; k++) nveci[k] = a1[2][k];
           for(k=0; k<3; k++) nvecj[k] = a2[2][k];
@@ -319,7 +315,7 @@ void PairGayBerne::compute(int eflag, int vflag)
           MathExtra::diag_times3(well[type[i]],a1,temp);
           MathExtra::transpose_times3(a1,temp,b1);
           MathExtra::diag_times3(well[type[j]],a2,temp);
-          MathExtra::transpose_times3(a2,temp,b2); 
+          MathExtra::transpose_times3(a2,temp,b2);
 /* ---------------------------------------------------------------------- */
 
           one_eng = gayberne_analytic(i,j,a1,a2,b1,b2,g1,g2,r12,rsq,fforce,
@@ -360,7 +356,7 @@ void PairGayBerne::compute(int eflag, int vflag)
                                  evdwl,0.0,fforce[0],fforce[1],fforce[2],
                                  -r12[0],-r12[1],-r12[2]);
 /* ----------------------------------------------------------------------
-   For calculation of friction
+   For calculation of friction (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
       }else{
         touch[jj] = 0;
@@ -405,7 +401,7 @@ void PairGayBerne::allocate()
   memory->create(offset,n+1,n+1,"pair:offset");
 
 /* ----------------------------------------------------------------------
-   For new variables
+   For new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   memory->create(cfa,n+1,n+1,"pair:cfa");
   memory->create(cfb,n+1,n+1,"pair:cfb");
@@ -433,8 +429,12 @@ void PairGayBerne::allocate()
 
 void PairGayBerne::settings(int narg, char **arg)
 {
+/* ----------------------------------------------------------------------
+   For new variables (modified by Yohei Nakamichi)
+------------------------------------------------------------------------- */
   /*if (narg != 4) error->all(FLERR,"Illegal pair_style command");*/
   if (narg != 8) error->all(FLERR,"Illegal pair_style command");
+/* ---------------------------------------------------------------------- */
 
   gamma = force->numeric(FLERR,arg[0]);
   upsilon = force->numeric(FLERR,arg[1])/2.0;
@@ -442,7 +442,7 @@ void PairGayBerne::settings(int narg, char **arg)
   cut_global = force->numeric(FLERR,arg[3]);
 
 /* ----------------------------------------------------------------------
-   For new flags
+   For new flags (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   Q_flag = force->numeric(FLERR,arg[4]);
   C_flag = force->numeric(FLERR,arg[5]);
@@ -466,8 +466,12 @@ void PairGayBerne::settings(int narg, char **arg)
 
 void PairGayBerne::coeff(int narg, char **arg)
 {
+/* ----------------------------------------------------------------------
+   For new variables (modified by Yohei Nakamichi)
+------------------------------------------------------------------------- */
   /*if (narg < 10 || narg > 11)*/
   if (narg < 24 || narg > 25)
+/* ---------------------------------------------------------------------- */
     error->all(FLERR,"Incorrect args for pair coefficients");
   if (!allocated) allocate();
 
@@ -488,7 +492,7 @@ void PairGayBerne::coeff(int narg, char **arg)
   if (narg == 11) cut_one = force->numeric(FLERR,arg[10]);*/
 
 /* ----------------------------------------------------------------------
-   For new variables
+   For new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   double gammasb_one = force->numeric(FLERR,arg[2]); 
   double epsilon_one = force->numeric(FLERR,arg[3]);
@@ -513,14 +517,14 @@ void PairGayBerne::coeff(int narg, char **arg)
   double xmu_one = force->numeric(FLERR,arg[22]);
   double hf_one = force->numeric(FLERR,arg[23]);
   double cut_one = cut_global;
-  if (narg == 25) cut_one = force->numeric(FLERR,arg[24]); 
+  if (narg == 25) cut_one = force->numeric(FLERR,arg[24]);
 /* ---------------------------------------------------------------------- */
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     for (int j = MAX(jlo,i); j <= jhi; j++) {
 /* ----------------------------------------------------------------------
-   For new variables
+   For new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
       gammasb[i][j] = gammasb_one;
       epsilon[i][j] = epsilon_one;
@@ -571,8 +575,7 @@ void PairGayBerne::coeff(int narg, char **arg)
 void PairGayBerne::init_style()
 {
   avec = (AtomVecEllipsoid *) atom->style_match("ellipsoid");
-  if (!avec) error->all(FLERR,
-             "Pair gayberne requires atom style ellipsoid");
+  if (!avec) error->all(FLERR,"Pair gayberne requires atom style ellipsoid");
 
   neighbor->request(this,instance_me);
 
@@ -583,7 +586,7 @@ void PairGayBerne::init_style()
   for (int i = 1; i <= atom->ntypes; i++) {
     if (!atom->shape_consistency(i,shape1[i][0],shape1[i][1],shape1[i][2]))
       error->all(FLERR,
-      "Pair gayberne requires atoms with same type have same shape");
+                 "Pair gayberne requires atoms with same type have same shape");
     if (shape1[i][0] == 0.0)
       shape1[i][0] = shape1[i][1] = shape1[i][2] = 1.0;
     shape2[i][0] = shape1[i][0]*shape1[i][0];
@@ -594,7 +597,7 @@ void PairGayBerne::init_style()
   }
 
 /* ----------------------------------------------------------------------
-   For calculation of friction
+   For calculation of friction (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   dt = update->dt;
 
@@ -645,7 +648,7 @@ double PairGayBerne::init_one(int i, int j)
 
   if (offset_flag && (cut[i][j] > 0.0)) {
     double ratio = sigma[i][j] / cut[i][j];
-    offset[i][j] = 4.0 * epsilon[i][j] * (pow(ratio,12.0)-pow(ratio,6.0));
+    offset[i][j] = 4.0 * epsilon[i][j] * (pow(ratio,12.0) - pow(ratio,6.0));
   } else offset[i][j] = 0.0;
 
   int ishape = 0;
@@ -671,7 +674,7 @@ double PairGayBerne::init_one(int i, int j)
     form[i][i] = form[j][j] = form[i][j] = form[j][i] = ELLIPSE_ELLIPSE;
 
 /* ----------------------------------------------------------------------
-   For new variables
+   For new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   gammasb[j][i] = gammasb[i][j];
   cfa[j][i] = cfa[i][j]; 
@@ -688,17 +691,7 @@ double PairGayBerne::init_one(int i, int j)
   xmu[j][i] = xmu[i][j];
   hf[j][i] = hf[i][j]; 
 /* ---------------------------------------------------------------------- */
-
-  epsilon[j][i] = epsilon[i][j];
-  sigma[j][i] = sigma[i][j];
-  lj1[j][i] = lj1[i][j];
-  lj2[j][i] = lj2[i][j];
-  lj3[j][i] = lj3[i][j];
-  lj4[j][i] = lj4[i][j];
-  offset[j][i] = offset[i][j];
-
   return cut[i][j];
-
 }
 
 /* ----------------------------------------------------------------------
@@ -716,9 +709,8 @@ void PairGayBerne::write_restart(FILE *fp)
     for (j = i; j <= atom->ntypes; j++) {
       fwrite(&setflag[i][j],sizeof(int),1,fp);
       if (setflag[i][j]) {
-
 /* ----------------------------------------------------------------------
-   For new variables
+   For new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
         fwrite(&gammasb[i][j],sizeof(double),1,fp); 
         fwrite(&epsilon[i][j],sizeof(double),1,fp);
@@ -738,7 +730,6 @@ void PairGayBerne::write_restart(FILE *fp)
         fwrite(&hf[i][j],sizeof(double),1,fp);
         fwrite(&cut[i][j],sizeof(double),1,fp); 
 /* ---------------------------------------------------------------------- */
-
       }
     }
   }
@@ -756,22 +747,19 @@ void PairGayBerne::read_restart(FILE *fp)
   int i,j;
   int me = comm->me;
   for (i = 1; i <= atom->ntypes; i++) {
-    if (me == 0) utils::sfread(FLERR,&setwell[i],sizeof(int),1,
-                               fp,NULL,error);
+    if (me == 0) utils::sfread(FLERR,&setwell[i],sizeof(int),1,fp,NULL,error);
     MPI_Bcast(&setwell[i],1,MPI_INT,0,world);
     if (setwell[i]) {
-      if (me == 0) utils::sfread(FLERR,&well[i][0],sizeof(double),3,
-                                 fp,NULL,error);
+      if (me == 0) utils::sfread(FLERR,&well[i][0],sizeof(double),3,fp,NULL,error);
       MPI_Bcast(&well[i][0],3,MPI_DOUBLE,0,world);
     }
     for (j = i; j <= atom->ntypes; j++) {
-      if (me == 0) utils::sfread(FLERR,&setflag[i][j],sizeof(int),1,
-                                 fp,NULL,error);
+      if (me == 0) utils::sfread(FLERR,&setflag[i][j],sizeof(int),1,fp,NULL,error);
       MPI_Bcast(&setflag[i][j],1,MPI_INT,0,world);
       if (setflag[i][j]) {
         if (me == 0) {
 /* ----------------------------------------------------------------------
-   For new variables
+   For new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
           utils::sfread(FLERR,&gammasb[i][j],sizeof(double),1,fp,NULL,error);
           utils::sfread(FLERR,&epsilon[i][j],sizeof(double),1,fp,NULL,error);
@@ -828,14 +816,13 @@ void PairGayBerne::write_restart_settings(FILE *fp)
   fwrite(&mix_flag,sizeof(int),1,fp);
 
 /* ----------------------------------------------------------------------
-   For new flags
+   For new flags (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   fwrite(&Q_flag,sizeof(int),1,fp);
   fwrite(&C_flag,sizeof(int),1,fp);
   fwrite(&interval,sizeof(int),1,fp);
   fwrite(&A_const,sizeof(int),1,fp);
 /* ---------------------------------------------------------------------- */
-
 }
 
 /* ----------------------------------------------------------------------
@@ -854,14 +841,13 @@ void PairGayBerne::read_restart_settings(FILE *fp)
     utils::sfread(FLERR,&mix_flag,sizeof(int),1,fp,NULL,error);
 
 /* ----------------------------------------------------------------------
-   For new flags
+   For new flags (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
     utils::sfread(FLERR,&Q_flag,sizeof(int),1,fp,NULL,error);
     utils::sfread(FLERR,&C_flag,sizeof(int),1,fp,NULL,error);
     utils::sfread(FLERR,&interval,sizeof(int),1,fp,NULL,error);
     utils::sfread(FLERR,&A_const,sizeof(int),1,fp,NULL,error);
 /* ---------------------------------------------------------------------- */
-
   }
   MPI_Bcast(&gamma,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&upsilon,1,MPI_DOUBLE,0,world);
@@ -871,14 +857,13 @@ void PairGayBerne::read_restart_settings(FILE *fp)
   MPI_Bcast(&mix_flag,1,MPI_INT,0,world);
 
 /* ----------------------------------------------------------------------
-   For new flags
+   For new flags (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   MPI_Bcast(&Q_flag,1,MPI_INT,0,world);
   MPI_Bcast(&C_flag,1,MPI_INT,0,world);
   MPI_Bcast(&interval,1,MPI_INT,0,world);
   MPI_Bcast(&A_const,1,MPI_INT,0,world);
 /* ---------------------------------------------------------------------- */
-
 }
 
 /* ----------------------------------------------------------------------
@@ -888,17 +873,17 @@ void PairGayBerne::read_restart_settings(FILE *fp)
 void PairGayBerne::write_data(FILE *fp)
 {
   for (int i = 1; i <= atom->ntypes; i++)
+/* ----------------------------------------------------------------------
+   For new variables (modified by Yohei Nakamichi)
+------------------------------------------------------------------------- */
     /*fprintf(fp,"%d %g %g %g %g %g %g %g %g\n",i,
             epsilon[i][i],sigma[i][i],*/
-
-/* ----------------------------------------------------------------------
-   For new variables
-------------------------------------------------------------------------- */
-    fprintf(fp,"%d %g %g %g %g %g %g %g %g %g %g %g %g %g 
-                %g %g %g %g %g %g %g %g %g\n",i, 
+    fprintf(fp,
+    "%d %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g\n"
+    ,i, 
             gammasb[i][i],epsilon[i][i],sigma[i][i],cfa[i][i],cfb[i][i],
             cfc[i][i], hth[i][i], aq[i][i], bq[i][i], cq[i][i], kn[i][i],
-            kt[i][i],gamma_n[i][i],gamma_t[i][i], xmu[i][i], hf[i][i], 
+            kt[i][i],gamma_n[i][i],gamma_t[i][i], xmu[i][i], hf[i][i],
 /* ---------------------------------------------------------------------- */
             pow(well[i][0],-mu),pow(well[i][1],-mu),pow(well[i][2],-mu),
             pow(well[i][0],-mu),pow(well[i][1],-mu),pow(well[i][2],-mu));
@@ -912,16 +897,17 @@ void PairGayBerne::write_data_all(FILE *fp)
 {
   for (int i = 1; i <= atom->ntypes; i++)
     for (int j = i; j <= atom->ntypes; j++)
+/* ----------------------------------------------------------------------
+   For new variables (modified by Yohei Nakamichi)
+------------------------------------------------------------------------- */
       /*fprintf(fp,"%d %d %g %g %g %g %g %g %g %g %g\n",i,j,
               epsilon[i][i],sigma[i][i],*/
-
-/* ----------------------------------------------------------------------
-   For new variables
-------------------------------------------------------------------------- */
-      fprintf(fp,"%d %d %g %g %g %g %g %g %g %g %g %g %g 
-                  %g %g %g %g %g %g %g %g %g %g %g %g\n",i,j, 
+      fprintf(fp,
+"%d %d %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g %g\n"
+,i,j, 
               gammasb[i][i],epsilon[i][i],sigma[i][i],cfa[i][i],cfb[i][i],
-              cfc[i][i], hth[i][i], aq[i][i], bq[i][i], cq[i][i], kn[i][i], 
+              cfc[i][i], hth[i][i], aq[i][i], bq[i][i], cq[i][i], kn[i][i],
+              kt[i][i],gamma_n[i][i],gamma_t[i][i], xmu[i][i], hf[i][i],
 /* ---------------------------------------------------------------------- */
               pow(well[i][0],-mu),pow(well[i][1],-mu),pow(well[i][2],-mu),
               pow(well[j][0],-mu),pow(well[j][1],-mu),pow(well[j][2],-mu),
@@ -934,40 +920,31 @@ void PairGayBerne::write_data_all(FILE *fp)
    if newton is off, rtor is not calculated for ghost atoms
 ------------------------------------------------------------------------- */
 
-/*double PairGayBerne::gayberne_analytic(const int i,const int j,
-                                       double a1[3][3],
+/*double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
                                        double a2[3][3], double b1[3][3],
                                        double b2[3][3], double g1[3][3],
                                        double g2[3][3], double *r12,
                                        const double rsq, double *fforce,
                                        double *ttor, double *rtor)*/
-
-/* ----------------------------------------------------------------------
-   For new potential function, modelling anisotropic surface charge, 
-   and interparticle friction
-------------------------------------------------------------------------- */
-double PairGayBerne::gayberne_analytic(const int i,const int j,
-                                       double a1[3][3],
+/*--------------- Modified by Yohei Nakamichi ---------------*/
+double PairGayBerne::gayberne_analytic(const int i,const int j,double a1[3][3],
                                        double a2[3][3], double b1[3][3],
                                        double b2[3][3], double g1[3][3],
                                        double g2[3][3], double *r12,
                                        const double rsq, double *fforce,
                                        double *ttor, double *rtor,
-                                       const double iweight, const 
-                                       double jweight,
+                                       const double iweight, const double jweight,
                                        double nveci[3], double nvecj[3],
                                        const double cosi, const double cosj,
-                                       int *touch, double *history, 
-                                       double *allhistory, const int jj )
-/* ---------------------------------------------------------------------- */
-
+                                       int *touch, double *history, double *allhistory, const int jj )
+/*-----------------------------------------------------------*/
 {
   double tempv[3], tempv2[3];
   double temp[3][3];
   double temp1,temp2,temp3;
 
 /* ----------------------------------------------------------------------
-   Define new variables
+   Define new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   double vr1,vr2,vr3,vnnr,vn1,vn2,vn3,vt1,vt2,vt3, vnn;
   double xtmp,ytmp,ztmp,delx,dely,delz,fx,fy,fz;
@@ -993,7 +970,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
   int nlocal = atom->nlocal;
 
 /* ----------------------------------------------------------------------
-   Define new variables
+   Define new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   AtomVecEllipsoid::Bonus *bonus = avec->bonus;
   int *ellipsoid = atom->ellipsoid;
@@ -1013,7 +990,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
   double r = sqrt(rsq);
 
 /* ----------------------------------------------------------------------
-   Define new variables
+   Define new variables (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   double rinv = 1.0/r;
   double rsqinv = 1.0/rsq;
@@ -1039,7 +1016,8 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
   double h12 = r-sigma12;
 
 /* ----------------------------------------------------------------------
-   Cut-off range is modified by a function of h12.
+   Cut-off range is modified by a function of h12. 
+   (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   ellipsoid_diameter = (shape1[type[i]][0]+shape1[type[i]][1]
     +shape1[type[j]][0]+shape1[type[j]][1])/2.0;
@@ -1063,6 +1041,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
 /* ----------------------------------------------------------------------
    This part is the algorithm to calculate contact and sub-contact 
    points of particles. 
+   (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   MathExtra::vecmat(kappa,g1,xca);
   MathExtra::vecmat(kappa,g2,xcb);
@@ -1074,8 +1053,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
   // energy
   // compute u_r
 
-  /*double varrho = sigma[type[i]][type[j]]
-                  /(h12+gamma*sigma[type[i]][type[j]]);
+  /*double varrho = sigma[type[i]][type[j]]/(h12+gamma*sigma[type[i]][type[j]]);
   double varrho6 = pow(varrho,6.0);
   double varrho12 = varrho6*varrho6;
   double u_r = 4.0*epsilon[type[i]][type[j]]*(varrho12-varrho6);*/
@@ -1084,6 +1062,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
    This part is the algorithm to calculate energy (u-r) for 
    each interaction (i.e. face-to-face, face-to-edge, 
    edge-to-face, and edge-to-edge)
+   (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   double tmp_h12 = h12;
 
@@ -1187,6 +1166,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
    This part is the algorithm to calculate interaction forces (dUr/dr) 
    for each interaction (i.e. face-to-face, face-to-edge, 
    edge-to-face, and edge-to-edge)
+   (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   //  face-to-face
   double u_slj_cc, dUr_cc[3], uslj_rsq_cc;
@@ -1194,7 +1174,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
         + 3.0*varrho3_cc*varrho_cc)/sigma[type[i]][type[j]];
   // quadratic function
   if( Q_flag == 1 && tmp_h12 < hth[type[i]][type[j]] ){
-    temp1 = -(2.0*aq[type[i]][type[j]]*tmp_h12+bq[type[i]][type[j]])};
+    temp1 = -(2.0*aq[type[i]][type[j]]*tmp_h12+bq[type[i]][type[j]]); }
   temp2 = MathExtra::dot3(kappa,r12hat);
   u_slj_cc = temp1*pow(sigma12,3.0)/2.0;
   uslj_rsq_cc = u_slj_cc/rsq;
@@ -1208,7 +1188,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
         + 3.0*varrho3_hh*varrho_hh)/sigma[3][3];
   // quadratic function
   if( Q_flag == 1 && tmp_h12 < hth[3][3] ){
-    temp1 = -(2.0*aq[3][3]*tmp_h12+bq[3][3])};
+    temp1 = -(2.0*aq[3][3]*tmp_h12+bq[3][3]); }
   temp2 = MathExtra::dot3(kappa,r12hat);
   u_slj_hh = temp1*pow(sigma12,3.0)/2.0;
   uslj_rsq_hh = u_slj_hh/rsq;
@@ -1222,7 +1202,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
         + 3.0*varrho3_ch*varrho_ch)/sigma[type[i]][3];
   // quadratic function
   if( Q_flag == 1 && tmp_h12 < hth[type[i]][3] ){
-    temp1 = -(2.0*aq[type[i]][3]*tmp_h12+bq[type[i]][3])};
+    temp1 = -(2.0*aq[type[i]][3]*tmp_h12+bq[type[i]][3]); }
   temp2 = MathExtra::dot3(kappa,r12hat);
   u_slj_ch = temp1*pow(sigma12,3.0)/2.0;
   uslj_rsq_ch = u_slj_ch/rsq;
@@ -1236,7 +1216,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
         + 3.0*varrho3_hc*varrho_hc)/sigma[3][type[j]];
   // quadratic function
   if( Q_flag == 1 && tmp_h12 < hth[3][type[j]] ){
-    temp1 = -(2.0*aq[3][type[j]]*tmp_h12+bq[3][type[j]])};
+    temp1 = -(2.0*aq[3][type[j]]*tmp_h12+bq[3][type[j]]); }
   temp2 = MathExtra::dot3(kappa,r12hat);
   u_slj_hc = temp1*pow(sigma12,3.0)/2.0;
   uslj_rsq_hc = u_slj_hc/rsq;
@@ -1347,9 +1327,9 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
   tempv[2] = -uslj_rsq*kappa[2];*/
 
 /* ----------------------------------------------------------------------
-   Modified torque calculation
+   Modified torque calculation (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
-  double tempv[0] = -(1.0/r)*(iweight*jweight*u_slj_cc/r*kappa[0] 
+  tempv[0] = -(1.0/r)*(iweight*jweight*u_slj_cc/r*kappa[0] 
            + iweight*djweight[0]*u_r_cc 
            + diweight[0]*jweight*u_r_cc
            + iweight*(1.0-jweight)*u_slj_ch/r*kappa[0] 
@@ -1461,7 +1441,12 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
   /*return temp1*chi;*/
 
 /* ----------------------------------------------------------------------
-   Thia part is for calculation of friction. Friction is calculated using Hookean contact model. 
+   Thia part is for calculation of tangential force. Tangential
+     force is calculated using Hookean contact model. if DEM_flag
+     is one, normal force is calculated using Hookean contacr mo-
+     del instead of Gay-Berne potential. In this case, potential 
+     energy isn't calculated, it keeps zero value. 
+     (modified by Yohei Nakamichi)
 ------------------------------------------------------------------------- */
   double vr[3], vn[3], vt[3], vnr[3], vrr[3];
 
@@ -1502,7 +1487,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
     inertia[2] = rmass[i] * (shape1[type[i]][0]*shape1[type[i]][0]
                             +shape1[type[i]][1]*shape1[type[i]][1]) / 5.0;
 
-    /*angular velocity:wbody = angular velocity in xyz coordination system*/
+    /* angular velocity : wbody = angular velocity in xyz coordination system */
     iquat = bonus[ellipsoid[i]].quat;
     MathExtra::quat_to_mat(iquat,rot);
     MathExtra::transpose_matvec(rot,angmom[i],tmp_iwbody);
@@ -1519,7 +1504,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
     inertia[2] = rmass[j] * (shape1[type[j]][0]*shape1[type[j]][0]
                             +shape1[type[j]][1]*shape1[type[j]][1]) / 5.0;
 
-    /*angular velocity:wbody = angular velocity in xyz coordination system*/
+    /* angular velocity : wbody = angular velocity in xyz coordination system */
     jquat = bonus[ellipsoid[j]].quat;
     MathExtra::quat_to_mat(jquat,rot);
     MathExtra::transpose_matvec(rot,angmom[j],tmp_jwbody);
@@ -1589,7 +1574,6 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
     /* rescale frictional displacements and forces if needed */
     fs = sqrt(fss[0]*fss[0] + fss[1]*fss[1] + fss[2]*fss[2]);
 
-    /* Hookean contacr model */
     fn = MathExtra::dot3(fforce,r12hat);
     fn = sqrt(fn*fn);
     fn *= xmu[type[i]][type[j]];
@@ -1619,6 +1603,7 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
     fforce[0] += fss[0];
     fforce[1] += fss[1];
     fforce[2] += fss[2];
+    
     
     /* torque */
     f_torque[0] = fss[0];
@@ -1663,4 +1648,75 @@ double PairGayBerne::gayberne_analytic(const int i,const int j,
   double pe = u_gb*eta*chi;
   return pe;
 }
-//__________________________________________________________________
+/* ----------------------------------------------------------------------
+   torque contribution from eta
+   computes trace in the last doc equation for the torque derivative
+   code comes from symbolic solver dump
+   m is g12, m2 is a_i, s is the shape for the particle
+------------------------------------------------------------------------- */
+
+void PairGayBerne::compute_eta_torque(double m[3][3], double m2[3][3],
+                                      double *s, double ans[3][3])
+{
+  double den = m[1][0]*m[0][2]*m[2][1]-m[0][0]*m[1][2]*m[2][1]-
+    m[0][2]*m[2][0]*m[1][1]+m[0][1]*m[2][0]*m[1][2]-
+    m[1][0]*m[0][1]*m[2][2]+m[0][0]*m[1][1]*m[2][2];
+
+  ans[0][0] = s[0]*(m[1][2]*m[0][1]*m2[0][2]+2.0*m[1][1]*m[2][2]*m2[0][0]-
+                    m[1][1]*m2[0][2]*m[0][2]-2.0*m[1][2]*m2[0][0]*m[2][1]+
+                    m2[0][1]*m[0][2]*m[2][1]-m2[0][1]*m[0][1]*m[2][2]-
+                    m[1][0]*m[2][2]*m2[0][1]+m[2][0]*m[1][2]*m2[0][1]+
+                    m[1][0]*m2[0][2]*m[2][1]-m2[0][2]*m[2][0]*m[1][1])/den;
+
+  ans[0][1] = s[0]*(m[0][2]*m2[0][0]*m[2][1]-m[2][2]*m2[0][0]*m[0][1]+
+                    2.0*m[0][0]*m[2][2]*m2[0][1]-m[0][0]*m2[0][2]*m[1][2]-
+                    2.0*m[2][0]*m[0][2]*m2[0][1]+m2[0][2]*m[1][0]*m[0][2]-
+                    m[2][2]*m[1][0]*m2[0][0]+m[2][0]*m2[0][0]*m[1][2]+
+                    m[2][0]*m2[0][2]*m[0][1]-m2[0][2]*m[0][0]*m[2][1])/den;
+
+  ans[0][2] = s[0]*(m[0][1]*m[1][2]*m2[0][0]-m[0][2]*m2[0][0]*m[1][1]-
+                    m[0][0]*m[1][2]*m2[0][1]+m[1][0]*m[0][2]*m2[0][1]-
+                    m2[0][1]*m[0][0]*m[2][1]-m[2][0]*m[1][1]*m2[0][0]+
+                    2.0*m[1][1]*m[0][0]*m2[0][2]-2.0*m[1][0]*m2[0][2]
+                    *m[0][1]+
+                    m[1][0]*m[2][1]*m2[0][0]+m[2][0]*m2[0][1]*m[0][1])/den;
+
+  ans[1][0] = s[1]*(-m[1][1]*m2[1][2]*m[0][2]+2.0*m[1][1]*m[2][2]*m2[1][0]+
+                    m[1][2]*m[0][1]*m2[1][2]-2.0*m[1][2]*m2[1][0]*m[2][1]+
+                    m2[1][1]*m[0][2]*m[2][1]-m2[1][1]*m[0][1]*m[2][2]-
+                    m[1][0]*m[2][2]*m2[1][1]+m[2][0]*m[1][2]*m2[1][1]-
+                    m2[1][2]*m[2][0]*m[1][1]+m[1][0]*m2[1][2]*m[2][1])/den;
+
+  ans[1][1] = s[1]*(m[0][2]*m2[1][0]*m[2][1]-m[0][1]*m[2][2]*m2[1][0]+
+                    2.0*m[2][2]*m[0][0]*m2[1][1]-m2[1][2]*m[0][0]*m[1][2]-
+                    2.0*m[2][0]*m2[1][1]*m[0][2]-m[1][0]*m[2][2]*m2[1][0]+
+                    m[2][0]*m[1][2]*m2[1][0]+m[1][0]*m2[1][2]*m[0][2]-
+                    m[0][0]*m2[1][2]*m[2][1]+m2[1][2]*m[0][1]*m[2][0])/den;
+
+  ans[1][2] = s[1]*(m[0][1]*m[1][2]*m2[1][0]-m[0][2]*m2[1][0]*m[1][1]-
+                    m[0][0]*m[1][2]*m2[1][1]+m[1][0]*m[0][2]*m2[1][1]+
+                    2.0*m[1][1]*m[0][0]*m2[1][2]-m[0][0]*m2[1][1]*m[2][1]+
+                    m[0][1]*m[2][0]*m2[1][1]-m2[1][0]*m[2][0]*m[1][1]-
+                    2.0*m[1][0]*m[0][1]*m2[1][2]+m[1][0]*m2[1][0]*m[2][1])
+                    /den;
+
+  ans[2][0] = s[2]*(-m[1][1]*m[0][2]*m2[2][2]+m[0][1]*m[1][2]*m2[2][2]+
+                    2.0*m[1][1]*m2[2][0]*m[2][2]-m[0][1]*m2[2][1]*m[2][2]+
+                    m[0][2]*m[2][1]*m2[2][1]-2.0*m2[2][0]*m[2][1]*m[1][2]-
+                    m[1][0]*m2[2][1]*m[2][2]+m[1][2]*m[2][0]*m2[2][1]-
+                    m[1][1]*m[2][0]*m2[2][2]+m[2][1]*m[1][0]*m2[2][2])/den;
+
+  ans[2][1] = s[2]*-(m[0][1]*m[2][2]*m2[2][0]-m[0][2]*m2[2][0]*m[2][1]-
+                     2.0*m2[2][1]*m[0][0]*m[2][2]+m[1][2]*m2[2][2]*m[0][0]+
+                     2.0*m2[2][1]*m[0][2]*m[2][0]+m[1][0]*m2[2][0]*m[2][2]-
+                     m[1][0]*m[0][2]*m2[2][2]-m[1][2]*m[2][0]*m2[2][0]+
+                     m[0][0]*m2[2][2]*m[2][1]-m2[2][2]*m[0][1]*m[2][0])/den;
+
+  ans[2][2] = s[2]*(m[0][1]*m[1][2]*m2[2][0]-m[0][2]*m2[2][0]*m[1][1]-
+                    m[0][0]*m[1][2]*m2[2][1]+m[1][0]*m[0][2]*m2[2][1]-
+                    m[1][1]*m[2][0]*m2[2][0]-m[2][1]*m2[2][1]*m[0][0]+
+                    2.0*m[1][1]*m2[2][2]*m[0][0]+m[2][1]*m[1][0]*m2[2][0]+
+                    m[2][0]*m[0][1]*m2[2][1]-2.0*m2[2][2]*m[1][0]*m[0][1])
+                    /den;
+}
+/* ---------------------------------------------------------------------- */
